@@ -61,13 +61,13 @@ struct CodexStatusReaderTests {
     let now = try #require(makeDate("2026-05-19T10:00:00Z"))
     let macBookStore = CodexUsageSyncStore(
       syncRoot: root,
-      deviceID: .macBookPro,
+      deviceID: "macbook-pro",
       deviceName: "MacBook Pro",
       hostName: "demo-mbp"
     )
     let macStudioStore = CodexUsageSyncStore(
       syncRoot: root,
-      deviceID: .macStudio,
+      deviceID: "mac-studio",
       deviceName: "Mac Studio",
       hostName: "demo-studio"
     )
@@ -95,9 +95,9 @@ struct CodexStatusReaderTests {
 
     let snapshots = macStudioStore.readSnapshots()
 
-    #expect(snapshots.map(\.deviceID) == [.macBookPro, .macStudio])
-    #expect(snapshots.first { $0.deviceID == .macBookPro }?.todayTokens == 120)
-    #expect(snapshots.first { $0.deviceID == .macStudio }?.monthTokens == 500)
+    #expect(Set(snapshots.map(\.deviceID)) == ["macbook-pro", "mac-studio"])
+    #expect(snapshots.first { $0.deviceID == "macbook-pro" }?.todayTokens == 120)
+    #expect(snapshots.first { $0.deviceID == "mac-studio" }?.monthTokens == 500)
   }
 
   @Test

@@ -288,34 +288,35 @@ public struct AccountTokenUsage: Equatable, Sendable {
   }
 }
 
-public enum CodexDeviceID: String, CaseIterable, Codable, Identifiable, Sendable {
-  case macBookPro = "macbook-pro"
-  case macStudio = "mac-studio"
-
-  public var id: String { rawValue }
-
-  public var displayName: String {
-    switch self {
-    case .macBookPro: "MacBook Pro"
-    case .macStudio: "Mac Studio"
+/// 设备标识：由本机名自动生成的 slug（如 "tilos-macbook-pro"），支持任意台数设备。
+/// 旧版固定的 "macbook-pro" / "mac-studio" 仍是合法取值，旧 iCloud 文件无需迁移。
+public enum DeviceIdentity {
+  /// 把主机名/自定义名转成文件名安全的 slug
+  public static func slug(from name: String) -> String {
+    let lowered = name.lowercased()
+      .replacingOccurrences(of: ".local", with: "")
+      .replacingOccurrences(of: "的", with: "-")
+    let mapped = lowered.map { ch -> Character in
+      (ch.isLetter || ch.isNumber) ? ch : "-"
     }
+    var slug = String(mapped)
+    while slug.contains("--") { slug = slug.replacingOccurrences(of: "--", with: "-") }
+    slug = slug.trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+    return slug.isEmpty ? "mac" : slug
   }
 
-  public var fileName: String {
-    "\(rawValue).json"
-  }
-
-  public func fileName(for app: ToolID) -> String {
-    "\(rawValue)-\(app.rawValue).json"
+  public static func fileName(deviceID: String, app: ToolID) -> String {
+    "\(deviceID)-\(app.rawValue).json"
   }
 }
 
+
 public struct CodexDeviceTokenUsage: Identifiable, Equatable, Codable, Sendable {
-  public var id: CodexDeviceID { deviceID }
+  public var id: String { deviceID }
   public var schemaVersion: Int
   /// schemaVersion 1 的旧文件没有该字段，解码缺省为 .codex
   public var app: ToolID
-  public var deviceID: CodexDeviceID
+  public var deviceID: String
   public var deviceName: String
   public var hostName: String
   public var updatedAt: Date
@@ -328,7 +329,7 @@ public struct CodexDeviceTokenUsage: Identifiable, Equatable, Codable, Sendable 
   public init(
     schemaVersion: Int = 2,
     app: ToolID = .codex,
-    deviceID: CodexDeviceID,
+    deviceID: String,
     deviceName: String,
     hostName: String,
     updatedAt: Date,
@@ -355,7 +356,7 @@ public struct CodexDeviceTokenUsage: Identifiable, Equatable, Codable, Sendable 
     let container = try decoder.container(keyedBy: CodingKeys.self)
     schemaVersion = try container.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
     app = try container.decodeIfPresent(ToolID.self, forKey: .app) ?? .codex
-    deviceID = try container.decode(CodexDeviceID.self, forKey: .deviceID)
+    deviceID = try container.decode(String.self, forKey: .deviceID)
     deviceName = try container.decode(String.self, forKey: .deviceName)
     hostName = try container.decodeIfPresent(String.self, forKey: .hostName) ?? ""
     updatedAt = try container.decode(Date.self, forKey: .updatedAt)

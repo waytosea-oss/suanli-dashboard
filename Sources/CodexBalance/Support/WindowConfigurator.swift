@@ -7,14 +7,38 @@ enum WindowConfigurator {
   static let miniCompactSize = NSSize(width: 236, height: 148)
   static let expandedSize = NSSize(width: 620, height: 820)
 
-  static func compactSize(for mode: CompactSizeMode, style: CompactStyle = .rings) -> NSSize {
+  static func compactSize(
+    for mode: CompactSizeMode,
+    style: CompactStyle = .rings,
+    toolCount: Int = 2
+  ) -> NSSize {
+    let dual = toolCount >= 2
     switch style {
     case .rings:
-      return mode == .mini ? miniCompactSize : compactSize
+      if mode == .mini {
+        return dual ? miniCompactSize : NSSize(width: 138, height: 148)
+      }
+      return dual ? compactSize : NSSize(width: 184, height: 196)
     case .bars:
-      return mode == .mini ? NSSize(width: 212, height: 62) : NSSize(width: 248, height: 74)
+      if mode == .mini {
+        return NSSize(width: 212, height: dual ? 62 : 42)
+      }
+      return NSSize(width: 248, height: dual ? 74 : 50)
+    case .barsQuad:
+      if mode == .mini {
+        return NSSize(width: 212, height: dual ? 104 : 62)
+      }
+      return NSSize(width: 248, height: dual ? 122 : 74)
     case .badge:
-      return mode == .mini ? NSSize(width: 138, height: 34) : NSSize(width: 158, height: 40)
+      if mode == .mini {
+        return NSSize(width: dual ? 138 : 80, height: 34)
+      }
+      return NSSize(width: dual ? 158 : 92, height: 40)
+    case .badgeQuad:
+      if mode == .mini {
+        return NSSize(width: dual ? 208 : 118, height: 34)
+      }
+      return NSSize(width: dual ? 238 : 134, height: 40)
     }
   }
 
@@ -23,6 +47,7 @@ enum WindowConfigurator {
     compact: Bool,
     compactSizeMode: CompactSizeMode = .standard,
     compactStyle: CompactStyle = .rings,
+    toolCount: Int = 2,
     keepPosition: Bool = true
   ) {
     window.title = "算力码表"
@@ -33,7 +58,7 @@ enum WindowConfigurator {
     window.level = .floating
     window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
     window.isMovableByWindowBackground = true
-    let resolvedCompactSize = compactSize(for: compactSizeMode, style: compactStyle)
+    let resolvedCompactSize = compactSize(for: compactSizeMode, style: compactStyle, toolCount: toolCount)
     window.minSize = compact ? resolvedCompactSize : NSSize(width: 560, height: 720)
     window.maxSize = compact ? resolvedCompactSize : NSSize(width: 760, height: 940)
 

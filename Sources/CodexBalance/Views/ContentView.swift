@@ -13,8 +13,12 @@ struct ContentView: View {
       if store.isCompact {
         CompactDashboardView()
           .frame(
-            width: WindowConfigurator.compactSize(for: store.compactSizeMode, style: store.compactStyle).width,
-            height: WindowConfigurator.compactSize(for: store.compactSizeMode, style: store.compactStyle).height
+            width: WindowConfigurator.compactSize(
+              for: store.compactSizeMode, style: store.compactStyle, toolCount: store.enabledToolCount
+            ).width,
+            height: WindowConfigurator.compactSize(
+              for: store.compactSizeMode, style: store.compactStyle, toolCount: store.enabledToolCount
+            ).height
           )
       } else {
         ExpandedDashboardView()
@@ -29,6 +33,7 @@ struct ContentView: View {
         compact: store.isCompact,
         compactSizeMode: store.compactSizeMode,
         compactStyle: store.compactStyle,
+        toolCount: store.enabledToolCount,
         keepPosition: false
       )
       autoDodgeIfNeeded(force: true)
@@ -46,6 +51,7 @@ struct ContentView: View {
           compact: isCompact,
           compactSizeMode: store.compactSizeMode,
           compactStyle: store.compactStyle,
+          toolCount: store.enabledToolCount,
           keepPosition: false
         )
         autoDodgeIfNeeded(force: true)
@@ -58,6 +64,7 @@ struct ContentView: View {
           compact: true,
           compactSizeMode: compactSizeMode,
           compactStyle: store.compactStyle,
+          toolCount: store.enabledToolCount,
           keepPosition: false
         )
       }
@@ -69,6 +76,19 @@ struct ContentView: View {
           compact: true,
           compactSizeMode: store.compactSizeMode,
           compactStyle: compactStyle,
+          toolCount: store.enabledToolCount,
+          keepPosition: true
+        )
+      }
+    }
+    .onChange(of: store.enabledToolCount) { _, _ in
+      if let configuredWindow, store.isCompact {
+        WindowConfigurator.configure(
+          configuredWindow,
+          compact: true,
+          compactSizeMode: store.compactSizeMode,
+          compactStyle: store.compactStyle,
+          toolCount: store.enabledToolCount,
           keepPosition: true
         )
       }
@@ -100,7 +120,9 @@ struct ContentView: View {
        Date().timeIntervalSince(lastManualMove) < 600 {
       return
     }
-    let size = WindowConfigurator.compactSize(for: store.compactSizeMode, style: store.compactStyle)
+    let size = WindowConfigurator.compactSize(
+      for: store.compactSizeMode, style: store.compactStyle, toolCount: store.enabledToolCount
+    )
     guard let origin = WindowAutoPlacer.bestCornerOrigin(for: size, window: window) else { return }
     let current = window.frame.origin
     guard abs(current.x - origin.x) > 2 || abs(current.y - origin.y) > 2 else { return }

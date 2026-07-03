@@ -1,6 +1,5 @@
 .build/
 dist/
 release/
-*.xcodeproj
+*.xcodeproj/xcuserdata/
 .DS_Store
-nohup.out

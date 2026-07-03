@@ -3,7 +3,7 @@ import Foundation
 public final class CodexUsageSyncStore: @unchecked Sendable {
   public let syncRoot: URL?
   public let app: ToolID
-  public let deviceID: CodexDeviceID
+  public let deviceID: String
   public let deviceName: String
   public let hostName: String
 
@@ -13,7 +13,7 @@ public final class CodexUsageSyncStore: @unchecked Sendable {
   public init(
     syncRoot: URL? = nil,
     app: ToolID = .codex,
-    deviceID: CodexDeviceID? = nil,
+    deviceID: String? = nil,
     deviceName: String? = nil,
     hostName: String? = nil,
     fileManager: FileManager = .default,
@@ -23,10 +23,58 @@ public final class CodexUsageSyncStore: @unchecked Sendable {
     self.app = app
     self.syncRoot = syncRoot ?? Self.resolveSyncRoot(fileManager: fileManager, environment: environment)
     self.hostName = hostName ?? Self.currentHostName()
-    self.deviceID = deviceID ?? Self.resolveDeviceID(hostName: self.hostName, environment: environment)
+    let computerName = Self.currentComputerName() ?? self.hostName
+    let resolvedID = deviceID
+      ?? environment["CODEX_BALANCE_DEVICE_ID"].map { DeviceIdentity.slug(from: $0) }
+      ?? Self.legacyDeviceID(hostName: self.hostName, syncRoot: self.syncRoot, app: app, fileManager: fileManager)
+      ?? DeviceIdentity.slug(from: computerName)
+    self.deviceID = resolvedID
+    // 显示名优先级：显式参数 > 环境变量 > 本机已有同步文件里的名字（保持两台机器图例稳定）> 电脑名
     self.deviceName = deviceName
       ?? environment["CODEX_BALANCE_DEVICE_NAME"]
-      ?? self.deviceID.displayName
+      ?? Self.existingDeviceName(deviceID: resolvedID, syncRoot: self.syncRoot, app: app, fileManager: fileManager)
+      ?? computerName
+  }
+
+  /// 老用户平滑升级：本机主机名匹配旧的两台设备命名时，沿用旧 deviceID，
+  /// 这样历史 iCloud 文件（macbook-pro-*.json / mac-studio-*.json）继续归属本机。
+  private static func legacyDeviceID(
+    hostName: String,
+    syncRoot: URL?,
+    app: ToolID,
+    fileManager: FileManager
+  ) -> String? {
+    guard let syncRoot else { return nil }
+    let normalized = hostName.lowercased()
+    let candidate: String
+    if normalized.contains("macbook") || normalized.contains("book") || normalized.contains("mbp") {
+      candidate = "macbook-pro"
+    } else if normalized.contains("studio") {
+      candidate = "mac-studio"
+    } else {
+      return nil
+    }
+    let file = syncRoot.appendingPathComponent(DeviceIdentity.fileName(deviceID: candidate, app: app))
+    return fileManager.fileExists(atPath: file.path) ? candidate : nil
+  }
+
+  private static func existingDeviceName(
+    deviceID: String,
+    syncRoot: URL?,
+    app: ToolID,
+    fileManager: FileManager
+  ) -> String? {
+    guard let syncRoot else { return nil }
+    let file = syncRoot.appendingPathComponent(DeviceIdentity.fileName(deviceID: deviceID, app: app))
+    guard let data = try? Data(contentsOf: file),
+          let snapshot = try? decoder.decode(CodexDeviceTokenUsage.self, from: data),
+          !snapshot.deviceName.isEmpty
+    else { return nil }
+    return snapshot.deviceName
+  }
+
+  private static func currentComputerName() -> String? {
+    Host.current().localizedName
   }
 
   public func makeSnapshot(from stats: TokenStats, now: Date = Date()) -> CodexDeviceTokenUsage {
@@ -57,13 +105,16 @@ public final class CodexUsageSyncStore: @unchecked Sendable {
     guard let syncRoot else { return }
     try fileManager.createDirectory(at: syncRoot, withIntermediateDirectories: true)
     let data = try Self.encoder.encode(snapshot)
-    try data.write(to: syncRoot.appendingPathComponent(snapshot.deviceID.fileName(for: snapshot.app)), options: [.atomic])
+    try data.write(
+      to: syncRoot.appendingPathComponent(DeviceIdentity.fileName(deviceID: snapshot.deviceID, app: snapshot.app)),
+      options: [.atomic]
+    )
   }
 
   public func readSnapshots(including localSnapshot: CodexDeviceTokenUsage? = nil) -> [CodexDeviceTokenUsage] {
     migrateLegacyFilesIfNeeded()
 
-    var snapshots: [CodexDeviceID: CodexDeviceTokenUsage] = [:]
+    var snapshots: [String: CodexDeviceTokenUsage] = [:]
     if let localSnapshot, localSnapshot.app == app {
       snapshots[localSnapshot.deviceID] = localSnapshot
     }
@@ -107,9 +158,9 @@ public final class CodexUsageSyncStore: @unchecked Sendable {
     ].compactMap { $0 }
 
     for legacyRoot in legacyRoots {
-      for deviceID in CodexDeviceID.allCases {
-        let legacyURL = legacyRoot.appendingPathComponent(deviceID.fileName)
-        let migratedURL = syncRoot.appendingPathComponent(deviceID.fileName(for: .codex))
+      for deviceID in ["macbook-pro", "mac-studio"] {
+        let legacyURL = legacyRoot.appendingPathComponent("\(deviceID).json")
+        let migratedURL = syncRoot.appendingPathComponent(DeviceIdentity.fileName(deviceID: deviceID, app: .codex))
         guard fileManager.fileExists(atPath: legacyURL.path),
               !fileManager.fileExists(atPath: migratedURL.path),
               let data = try? Data(contentsOf: legacyURL),
@@ -123,8 +174,13 @@ public final class CodexUsageSyncStore: @unchecked Sendable {
     }
   }
 
-  private func orderedSnapshots(_ snapshots: [CodexDeviceID: CodexDeviceTokenUsage]) -> [CodexDeviceTokenUsage] {
-    CodexDeviceID.allCases.compactMap { snapshots[$0] }
+  /// 本机排最前，其余按显示名排序（支持任意台数设备）
+  private func orderedSnapshots(_ snapshots: [String: CodexDeviceTokenUsage]) -> [CodexDeviceTokenUsage] {
+    snapshots.values.sorted { lhs, rhs in
+      if lhs.deviceID == deviceID { return true }
+      if rhs.deviceID == deviceID { return false }
+      return lhs.deviceName.localizedStandardCompare(rhs.deviceName) == .orderedAscending
+    }
   }
 
   private static var encoder: JSONEncoder {
@@ -168,34 +224,6 @@ public final class CodexUsageSyncStore: @unchecked Sendable {
       .appendingPathComponent("com~apple~CloudDocs")
     guard fileManager.fileExists(atPath: cloudDocs.path) else { return nil }
     return cloudDocs
-  }
-
-  private static func resolveDeviceID(hostName: String, environment: [String: String]) -> CodexDeviceID {
-    if let override = environment["CODEX_BALANCE_DEVICE_ID"],
-       let id = parseDeviceID(override) {
-      return id
-    }
-
-    let normalized = hostName.lowercased()
-    if normalized.contains("macbook") || normalized.contains("book") || normalized.contains("mbp") {
-      return .macBookPro
-    }
-    return .macStudio
-  }
-
-  private static func parseDeviceID(_ value: String) -> CodexDeviceID? {
-    let normalized = value
-      .lowercased()
-      .replacingOccurrences(of: "_", with: "-")
-      .replacingOccurrences(of: " ", with: "-")
-    switch normalized {
-    case "macbook-pro", "macbookpro", "mbp":
-      return .macBookPro
-    case "mac-studio", "macstudio", "studio":
-      return .macStudio
-    default:
-      return CodexDeviceID(rawValue: normalized)
-    }
   }
 
   private static func currentHostName() -> String {

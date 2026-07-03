@@ -9,8 +9,10 @@ struct CompactDashboardView: View {
   var body: some View {
     switch store.compactStyle {
     case .rings: CompactRingsView()
-    case .bars: CompactBarsView()
-    case .badge: CompactBadgeView()
+    case .bars: CompactBarsView(quad: false)
+    case .barsQuad: CompactBarsView(quad: true)
+    case .badge: CompactBadgeView(quad: false)
+    case .badgeQuad: CompactBadgeView(quad: true)
     }
   }
 }
@@ -46,28 +48,34 @@ struct CompactRingsView: View {
         .shadow(color: Color.black.opacity(backgroundOpacity * 0.22), radius: 12, x: 0, y: 8)
 
       HStack(spacing: 0) {
-        toolColumn(
-          label: "Codex",
-          tab: .codex,
-          primary: store.primary,
-          secondary: store.secondary,
-          primaryColor: palette.fiveHour,
-          secondaryColor: palette.weekly,
-          unavailable: store.status?.main == nil
-        )
-        Rectangle()
-          .fill(Color.white.opacity(0.08))
-          .frame(width: 1)
-          .padding(.vertical, isMini ? 18 : 26)
-        toolColumn(
-          label: "Claude",
-          tab: .claude,
-          primary: store.claudePrimary,
-          secondary: store.claudeSecondary,
-          primaryColor: palette.claudeFiveHour,
-          secondaryColor: palette.claudeWeekly,
-          unavailable: !store.claudeBalanceAvailable
-        )
+        if store.codexToolEnabled {
+          toolColumn(
+            label: "Codex",
+            tab: .codex,
+            primary: store.primary,
+            secondary: store.secondary,
+            primaryColor: palette.fiveHour,
+            secondaryColor: palette.weekly,
+            unavailable: store.status?.main == nil
+          )
+        }
+        if store.codexToolEnabled && store.claudeToolEnabled {
+          Rectangle()
+            .fill(Color.white.opacity(0.08))
+            .frame(width: 1)
+            .padding(.vertical, isMini ? 18 : 26)
+        }
+        if store.claudeToolEnabled {
+          toolColumn(
+            label: "Claude",
+            tab: .claude,
+            primary: store.claudePrimary,
+            secondary: store.claudeSecondary,
+            primaryColor: palette.claudeFiveHour,
+            secondaryColor: palette.claudeWeekly,
+            unavailable: !store.claudeBalanceAvailable
+          )
+        }
       }
       .padding(.top, isMini ? 14 : 18)
       .padding(.bottom, isMini ? 4 : 6)

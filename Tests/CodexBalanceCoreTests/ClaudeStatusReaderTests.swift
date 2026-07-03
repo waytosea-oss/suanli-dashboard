@@ -95,8 +95,8 @@ struct ClaudeStatusReaderTests {
 @Suite("CodexUsageSyncStore 双工具命名")
 struct SyncStoreToolNamingTests {
   @Test func deviceFileNamesCarryToolSuffix() {
-    #expect(CodexDeviceID.macBookPro.fileName(for: .codex) == "macbook-pro-codex.json")
-    #expect(CodexDeviceID.macStudio.fileName(for: .claude) == "mac-studio-claude.json")
+    #expect(DeviceIdentity.fileName(deviceID: "macbook-pro", app: .codex) == "macbook-pro-codex.json")
+    #expect(DeviceIdentity.fileName(deviceID: "mac-studio", app: .claude) == "mac-studio-claude.json")
   }
 
   @Test func claudeSnapshotsKeepCacheFieldsSeparate() throws {
@@ -105,7 +105,7 @@ struct SyncStoreToolNamingTests {
     let store = CodexUsageSyncStore(
       syncRoot: root,
       app: .claude,
-      deviceID: .macBookPro,
+      deviceID: "macbook-pro",
       deviceName: "MacBook Pro",
       hostName: "test-host"
     )

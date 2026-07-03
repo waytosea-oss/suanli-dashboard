@@ -527,6 +527,30 @@ struct ExpandedDashboardView: View {
           .foregroundStyle(DashboardColors.subtleText)
       }
 
+      settingsSection(title: "监控工具", systemImage: "wrench.and.screwdriver.fill") {
+        HStack(spacing: 8) {
+          toolChip(
+            title: "Codex",
+            subtitle: "OpenAI Codex",
+            isOn: store.codexToolEnabled,
+            tint: palette.fiveHour
+          ) {
+            store.codexToolEnabled.toggle()
+          }
+          toolChip(
+            title: "Claude",
+            subtitle: "Claude Code",
+            isOn: store.claudeToolEnabled,
+            tint: palette.claudeFiveHour
+          ) {
+            store.claudeToolEnabled.toggle()
+          }
+        }
+        Text("按你实际使用的工具勾选，浮窗、Touch Bar 和面板都会跟随；至少保留一个")
+          .font(.system(size: 10.5, weight: .semibold))
+          .foregroundStyle(DashboardColors.subtleText)
+      }
+
       settingsSection(title: "外观", systemImage: "slider.horizontal.3") {
         settingsRow(title: "收起透明度", subtitle: "调整浮窗底板通透程度") {
           HStack(spacing: 10) {
@@ -557,7 +581,7 @@ struct ExpandedDashboardView: View {
               .font(.system(size: 10.5, weight: .semibold))
               .foregroundStyle(DashboardColors.subtleText)
           }
-          HStack(spacing: 8) {
+          LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3), spacing: 8) {
             ForEach(CompactStyle.allCases) { style in
               CompactStyleCard(
                 style: style,
@@ -781,6 +805,66 @@ struct ExpandedDashboardView: View {
               )
           )
           .help("周期性向系统申报用户活跃，保持 Touch Bar 常亮")
+
+          settingsRow(title: "显示 % 号", subtitle: "熟悉后可关掉，数字更大更干净") {
+            Toggle("", isOn: Binding(
+              get: { store.touchBarShowsPercentSign },
+              set: { store.touchBarShowsPercentSign = $0 }
+            ))
+            .labelsHidden()
+            .toggleStyle(.switch)
+            .controlSize(.small)
+          }
+
+          settingsRow(title: "显示 5时/7天 标签", subtitle: "关闭后只留数值本身") {
+            Toggle("", isOn: Binding(
+              get: { store.touchBarShowsWindowTags },
+              set: { store.touchBarShowsWindowTags = $0 }
+            ))
+            .labelsHidden()
+            .toggleStyle(.switch)
+            .controlSize(.small)
+          }
+
+          settingsRow(title: "显示最近会话", subtitle: "余额右侧显示最近 AI 会话，点击直达对应 App") {
+            Toggle("", isOn: Binding(
+              get: { store.touchBarShowsSessions },
+              set: { store.touchBarShowsSessions = $0 }
+            ))
+            .labelsHidden()
+            .toggleStyle(.switch)
+            .controlSize(.small)
+          }
+
+          if store.touchBarShowsSessions {
+            settingsRow(title: "会话数量", subtitle: "显示 1 个时字最大，一眼看清") {
+              Picker("", selection: Binding(
+                get: { store.touchBarSessionCount },
+                set: { store.touchBarSessionCount = $0 }
+              )) {
+                Text("1 个").tag(1)
+                Text("2 个").tag(2)
+                Text("3 个").tag(3)
+              }
+              .labelsHidden()
+              .pickerStyle(.segmented)
+              .frame(width: 150)
+            }
+          }
+
+          settingsRow(title: "Touch Bar 样式", subtitle: "全宽面板的呈现方式") {
+            Picker("", selection: Binding(
+              get: { store.touchBarStyle },
+              set: { store.touchBarStyle = $0 }
+            )) {
+              ForEach(TouchBarPanelStyle.allCases) { style in
+                Text(style.title).tag(style)
+              }
+            }
+            .labelsHidden()
+            .pickerStyle(.segmented)
+            .frame(width: 250)
+          }
         }
 
         if let message = store.settingsMessage {
@@ -790,6 +874,34 @@ struct ExpandedDashboardView: View {
             .lineLimit(1)
         }
       }
+      HStack(spacing: 6) {
+        Text("算力码表 suanli-dashboard")
+          .font(.system(size: 10.5, weight: .heavy))
+          .foregroundStyle(DashboardColors.subtleText)
+        Text("·")
+          .foregroundStyle(DashboardColors.subtleText)
+        Text("作者 Tilo Liang")
+          .font(.system(size: 10.5, weight: .heavy))
+          .foregroundStyle(DashboardColors.text.opacity(0.85))
+        Text("·")
+          .foregroundStyle(DashboardColors.subtleText)
+        Text("MIT 开源")
+          .font(.system(size: 10.5, weight: .semibold))
+          .foregroundStyle(DashboardColors.subtleText)
+        Spacer()
+        Button {
+          if let url = URL(string: AppInfo.repositoryURL) {
+            NSWorkspace.shared.open(url)
+          }
+        } label: {
+          Label("GitHub", systemImage: "link")
+            .font(.system(size: 10.5, weight: .heavy))
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(DashboardColors.subtleText)
+        .help("打开项目主页")
+      }
+      .padding(.top, 2)
     }
     .padding(14)
     .background(
@@ -800,6 +912,44 @@ struct ExpandedDashboardView: View {
             .stroke(Color.white.opacity(0.08), lineWidth: 1)
         )
     )
+  }
+
+  private func toolChip(
+    title: String,
+    subtitle: String,
+    isOn: Bool,
+    tint: Color,
+    action: @escaping () -> Void
+  ) -> some View {
+    Button(action: action) {
+      HStack(spacing: 8) {
+        Image(systemName: isOn ? "checkmark.circle.fill" : "circle")
+          .font(.system(size: 15, weight: .heavy))
+          .foregroundStyle(isOn ? tint : DashboardColors.subtleText)
+        VStack(alignment: .leading, spacing: 1) {
+          Text(title)
+            .font(.system(size: 12.5, weight: .heavy))
+            .foregroundStyle(isOn ? DashboardColors.text : DashboardColors.subtleText)
+          Text(subtitle)
+            .font(.system(size: 10, weight: .bold))
+            .foregroundStyle(DashboardColors.subtleText)
+        }
+        Spacer(minLength: 0)
+      }
+      .padding(.horizontal, 10)
+      .frame(maxWidth: .infinity)
+      .frame(height: 44)
+      .background(
+        RoundedRectangle(cornerRadius: 8, style: .continuous)
+          .fill(isOn ? tint.opacity(0.14) : Color.white.opacity(0.045))
+          .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+              .stroke(isOn ? tint.opacity(0.5) : Color.white.opacity(0.08), lineWidth: 1)
+          )
+      )
+    }
+    .buttonStyle(.plain)
+    .help(isOn ? "点击停用 \(title) 监控" : "点击启用 \(title) 监控")
   }
 
   private func settingsSection<Content: View>(
@@ -1372,37 +1522,19 @@ private enum TokenTrendPeriod: String, CaseIterable, Identifiable {
   }
 }
 
-private enum TokenTrendScope: String, CaseIterable, Identifiable {
-  case macBookPro
-  case macStudio
-  case total
-
-  var id: String { rawValue }
-
-  var title: String {
-    switch self {
-    case .macBookPro: "MacBook Pro"
-    case .macStudio: "Mac Studio"
-    case .total: "总算力"
-    }
-  }
-
-  var deviceID: CodexDeviceID? {
-    switch self {
-    case .macBookPro: .macBookPro
-    case .macStudio: .macStudio
-    case .total: nil
-    }
-  }
+private struct TokenTrendScopeInfo: Identifiable, Hashable {
+  var id: String        // deviceID 或 "total"
+  var title: String
+  var isTotal: Bool
 }
 
 private struct TokenTrendSeries: Identifiable {
-  var scope: TokenTrendScope
+  var info: TokenTrendScopeInfo
   var buckets: [TokenBucket]
   var tint: Color
 
-  var id: String { scope.rawValue }
-  var title: String { scope.title }
+  var id: String { info.id }
+  var title: String { info.title }
 
   var totalTokens: Int {
     buckets.reduce(0) { $0 + $1.totalTokens }
@@ -1428,21 +1560,36 @@ private struct TokenTrendPanel: View {
   /// Claude 暂无官方总量：不显示「总算力」线，避免用设备相加伪造总量
   var showsTotalScope = true
   @State private var selectedPeriod: TokenTrendPeriod = .daily
-  @State private var selectedScopes: Set<TokenTrendScope> = Set(TokenTrendScope.allCases)
+  /// 记「被取消勾选」的集合：设备列表是动态的（iCloud 快照陆续出现），新设备默认选中
+  @State private var deselectedScopes: Set<String> = []
 
-  private var availableScopes: [TokenTrendScope] {
-    showsTotalScope ? TokenTrendScope.allCases : [.macBookPro, .macStudio]
+  /// 动态设备列表（本机排最前，由 SyncStore 保证）+ 可选「总算力」
+  private var availableScopes: [TokenTrendScopeInfo] {
+    var scopes = stats.deviceUsage.map {
+      TokenTrendScopeInfo(id: $0.deviceID, title: $0.deviceName, isTotal: false)
+    }
+    if scopes.isEmpty {
+      scopes = [TokenTrendScopeInfo(id: "local", title: "当前设备", isTotal: false)]
+    }
+    if showsTotalScope {
+      scopes.append(TokenTrendScopeInfo(id: "total", title: "总算力", isTotal: true))
+    }
+    return scopes
+  }
+
+  private var selectedScopeInfos: [TokenTrendScopeInfo] {
+    availableScopes.filter { !deselectedScopes.contains($0.id) }
   }
 
   private var series: [TokenTrendSeries] {
-    availableScopes.compactMap { scope in
-      guard selectedScopes.contains(scope) else { return nil }
-      return trendSeries(for: scope)
-    }
+    selectedScopeInfos.map { trendSeries(for: $0) }
   }
 
   private var visibleSeries: [TokenTrendSeries] {
-    series.isEmpty ? [trendSeries(for: showsTotalScope ? .total : .macBookPro)] : series
+    if series.isEmpty, let first = availableScopes.first {
+      return [trendSeries(for: first)]
+    }
+    return series
   }
 
   private var localBuckets: [TokenBucket] {
@@ -1452,25 +1599,22 @@ private struct TokenTrendPanel: View {
     }
   }
 
-  private var deviceUsageByID: [CodexDeviceID: CodexDeviceTokenUsage] {
+  private var deviceUsageByID: [String: CodexDeviceTokenUsage] {
     Dictionary(uniqueKeysWithValues: stats.deviceUsage.map { ($0.deviceID, $0) })
   }
 
   private var templateBuckets: [TokenBucket] {
-    for deviceID in [CodexDeviceID.macBookPro, .macStudio] {
-      if let buckets = deviceBuckets(for: deviceID), !buckets.isEmpty {
-        return buckets
-      }
+    for usage in stats.deviceUsage {
+      let buckets = periodBuckets(of: usage)
+      if !buckets.isEmpty { return buckets }
     }
     return localBuckets
   }
 
-  private var unavailableSelectedScopes: [TokenTrendScope] {
-    TokenTrendScope.allCases.filter { selectedScopes.contains($0) && isUnavailable($0) }
-  }
-
   private var subtitle: String {
-    "\(selectedPeriod.subtitle) · iCloud 可多选对比"
+    stats.deviceUsage.count <= 1
+      ? "\(selectedPeriod.subtitle) · 其他设备打开码表后自动加入对比"
+      : "\(selectedPeriod.subtitle) · iCloud 可多选对比"
   }
 
   private var maxTokens: Double {
@@ -1495,10 +1639,10 @@ private struct TokenTrendPanel: View {
         HStack(spacing: 7) {
           ForEach(availableScopes) { scope in
             TokenTrendScopeToggleButton(
-              scope: scope,
+              title: scope.title,
               tint: color(for: scope),
-              isSelected: selectedScopes.contains(scope),
-              isUnavailable: isUnavailable(scope)
+              isSelected: !deselectedScopes.contains(scope.id),
+              isUnavailable: scope.isTotal && stats.deviceUsage.isEmpty
             ) {
               toggleScope(scope)
             }
@@ -1523,10 +1667,6 @@ private struct TokenTrendPanel: View {
           Spacer(minLength: 0)
         }
 
-        if !unavailableSelectedScopes.isEmpty {
-          TokenTrendInlineNotice(missingTitles: unavailableSelectedScopes.map(\.title).joined(separator: "、"))
-        }
-
         TokenMultiLineTrendChart(series: visibleSeries, maxTokens: maxTokens)
           .frame(height: 218)
       }
@@ -1540,54 +1680,46 @@ private struct TokenTrendPanel: View {
     )
   }
 
-  private func trendSeries(for scope: TokenTrendScope) -> TokenTrendSeries {
+  private func trendSeries(for scope: TokenTrendScopeInfo) -> TokenTrendSeries {
     let buckets: [TokenBucket]
-    switch scope {
-    case .macBookPro:
-      buckets = deviceBuckets(for: .macBookPro) ?? zeroBuckets()
-    case .macStudio:
-      buckets = deviceBuckets(for: .macStudio) ?? zeroBuckets()
-    case .total:
+    if scope.isTotal {
       buckets = totalBuckets()
+    } else if let usage = deviceUsageByID[scope.id] {
+      buckets = periodBuckets(of: usage)
+    } else {
+      buckets = localBuckets
     }
-    return TokenTrendSeries(scope: scope, buckets: buckets, tint: color(for: scope))
+    return TokenTrendSeries(info: scope, buckets: buckets, tint: color(for: scope))
   }
 
-  private func color(for scope: TokenTrendScope) -> Color {
-    switch scope {
-    case .macBookPro:
-      return primaryTint ?? palette.fiveHour
-    case .macStudio:
-      return showsTotalScope ? Color(red: 1.0, green: 0.47, blue: 0.30) : (secondaryTint ?? palette.weekly)
-    case .total:
+  /// 设备线按顺序取色（最多循环使用），总量线固定用主题次色
+  private func color(for scope: TokenTrendScopeInfo) -> Color {
+    if scope.isTotal {
       return secondaryTint ?? palette.weekly
     }
+    let deviceColors: [Color] = [
+      primaryTint ?? palette.fiveHour,
+      Color(red: 1.0, green: 0.47, blue: 0.30),
+      Color(red: 0.70, green: 0.62, blue: 1.0),
+      Color(red: 0.36, green: 0.86, blue: 0.74),
+      Color(red: 0.95, green: 0.65, blue: 0.85)
+    ]
+    let index = stats.deviceUsage.firstIndex { $0.deviceID == scope.id } ?? 0
+    return deviceColors[index % deviceColors.count]
   }
 
-  private func toggleScope(_ scope: TokenTrendScope) {
+  private func toggleScope(_ scope: TokenTrendScopeInfo) {
     withAnimation(.easeInOut(duration: 0.16)) {
-      if selectedScopes.contains(scope) {
-        guard selectedScopes.count > 1 else { return }
-        selectedScopes.remove(scope)
+      if deselectedScopes.contains(scope.id) {
+        deselectedScopes.remove(scope.id)
       } else {
-        selectedScopes.insert(scope)
+        guard selectedScopeInfos.count > 1 else { return }
+        deselectedScopes.insert(scope.id)
       }
     }
   }
 
-  private func isUnavailable(_ scope: TokenTrendScope) -> Bool {
-    switch scope {
-    case .macBookPro:
-      return deviceUsageByID[.macBookPro] == nil
-    case .macStudio:
-      return deviceUsageByID[.macStudio] == nil
-    case .total:
-      return stats.deviceUsage.isEmpty
-    }
-  }
-
-  private func deviceBuckets(for deviceID: CodexDeviceID) -> [TokenBucket]? {
-    guard let usage = deviceUsageByID[deviceID] else { return nil }
+  private func periodBuckets(of usage: CodexDeviceTokenUsage) -> [TokenBucket] {
     switch selectedPeriod {
     case .daily:
       return Array(usage.daily.suffix(14))
@@ -1603,7 +1735,7 @@ private struct TokenTrendPanel: View {
   }
 
   private func totalBuckets() -> [TokenBucket] {
-    let sources = [deviceBuckets(for: .macBookPro), deviceBuckets(for: .macStudio)].compactMap { $0 }
+    let sources = stats.deviceUsage.map { periodBuckets(of: $0) }.filter { !$0.isEmpty }
     guard !sources.isEmpty else { return zeroBuckets() }
 
     let template = templateBuckets
@@ -1626,7 +1758,7 @@ private struct TokenTrendPanel: View {
 }
 
 private struct TokenTrendScopeToggleButton: View {
-  var scope: TokenTrendScope
+  var title: String
   var tint: Color
   var isSelected: Bool
   var isUnavailable: Bool
@@ -1638,7 +1770,7 @@ private struct TokenTrendScopeToggleButton: View {
         Circle()
           .fill(tint.opacity(isSelected ? 0.95 : 0.38))
           .frame(width: 7, height: 7)
-        Text(scope.title)
+        Text(title)
           .font(.system(size: 11.5, weight: .heavy, design: .rounded))
           .lineLimit(1)
           .minimumScaleFactor(0.75)
@@ -1661,7 +1793,7 @@ private struct TokenTrendScopeToggleButton: View {
     }
     .buttonStyle(.plain)
     .opacity(isUnavailable ? 0.56 : 1)
-    .help(isUnavailable ? "等待 \(scope.title) 的 iCloud 同步快照" : "切换 \(scope.title)")
+    .help(isUnavailable ? "等待其他设备的 iCloud 同步快照" : "切换 \(title)")
   }
 }
 
@@ -2175,6 +2307,45 @@ private struct CompactStyleCard: View {
         miniBar(color: palette.claudeFiveHour, ratio: 0.63, label: "A")
       }
       .padding(.horizontal, 12)
+    case .barsQuad:
+      VStack(alignment: .leading, spacing: 3) {
+        miniBar(color: palette.fiveHour, ratio: 0.86, label: "C")
+        miniBar(color: palette.weekly, ratio: 0.98, label: "")
+        miniBar(color: palette.claudeFiveHour, ratio: 0.63, label: "A")
+        miniBar(color: palette.claudeWeekly, ratio: 0.44, label: "")
+      }
+      .padding(.horizontal, 12)
+    case .badgeQuad:
+      HStack(spacing: 4) {
+        Circle().fill(palette.fiveHour).frame(width: 5, height: 5)
+        Text("87")
+          .font(.system(size: 9.5, weight: .heavy, design: .rounded))
+          .foregroundStyle(palette.fiveHour)
+        Text("/")
+          .font(.system(size: 8, weight: .bold))
+          .foregroundStyle(DashboardColors.subtleText)
+        Text("100")
+          .font(.system(size: 9.5, weight: .heavy, design: .rounded))
+          .foregroundStyle(palette.weekly)
+        Rectangle().fill(Color.white.opacity(0.18)).frame(width: 1, height: 8)
+        Circle().fill(palette.claudeFiveHour).frame(width: 5, height: 5)
+        Text("84")
+          .font(.system(size: 9.5, weight: .heavy, design: .rounded))
+          .foregroundStyle(palette.claudeFiveHour)
+        Text("/")
+          .font(.system(size: 8, weight: .bold))
+          .foregroundStyle(DashboardColors.subtleText)
+        Text("62")
+          .font(.system(size: 9.5, weight: .heavy, design: .rounded))
+          .foregroundStyle(palette.claudeWeekly)
+      }
+      .padding(.horizontal, 6)
+      .padding(.vertical, 4)
+      .background(
+        Capsule(style: .continuous)
+          .fill(Color.black.opacity(0.5))
+          .overlay(Capsule(style: .continuous).stroke(Color.white.opacity(0.14), lineWidth: 1))
+      )
     case .badge:
       HStack(spacing: 5) {
         Circle().fill(palette.fiveHour).frame(width: 5, height: 5)

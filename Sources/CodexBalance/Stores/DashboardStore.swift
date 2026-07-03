@@ -28,7 +28,9 @@ enum DashboardToolTab: String, CaseIterable, Identifiable, Hashable {
 enum CompactStyle: String, CaseIterable, Identifiable, Hashable {
   case rings
   case bars
+  case barsQuad
   case badge
+  case badgeQuad
 
   var id: String { rawValue }
 
@@ -36,15 +38,38 @@ enum CompactStyle: String, CaseIterable, Identifiable, Hashable {
     switch self {
     case .rings: "双环"
     case .bars: "长条"
+    case .barsQuad: "长条·全"
     case .badge: "徽章"
+    case .badgeQuad: "徽章·全"
     }
   }
 
   var subtitle: String {
     switch self {
     case .rings: "经典同心双环"
-    case .bars: "双进度条，更省空间"
+    case .bars: "每工具一条更紧张窗口"
+    case .barsQuad: "每工具 5时+7天 双条"
     case .badge: "极简数字，占用最小"
+    case .badgeQuad: "四个数字全览"
+    }
+  }
+}
+
+/// Touch Bar 全宽面板的显示样式（与屏幕悬浮样式独立选择）
+enum TouchBarPanelStyle: String, CaseIterable, Identifiable, Hashable {
+  case barsQuad
+  case bars
+  case badgeQuad
+  case badge
+
+  var id: String { rawValue }
+
+  var title: String {
+    switch self {
+    case .barsQuad: "四进度条"
+    case .bars: "双进度条"
+    case .badgeQuad: "四数字"
+    case .badge: "双数字"
     }
   }
 }
@@ -97,6 +122,26 @@ final class DashboardStore: ObservableObject {
       UserDefaults.standard.set(compactSizeMode.rawValue, forKey: "compactSizeMode")
     }
   }
+  @Published var codexToolEnabled: Bool {
+    didSet {
+      if !codexToolEnabled && !claudeToolEnabled {
+        codexToolEnabled = true
+        return
+      }
+      UserDefaults.standard.set(codexToolEnabled, forKey: "toolEnabled.codex")
+      handleToolSelectionChange()
+    }
+  }
+  @Published var claudeToolEnabled: Bool {
+    didSet {
+      if !codexToolEnabled && !claudeToolEnabled {
+        claudeToolEnabled = true
+        return
+      }
+      UserDefaults.standard.set(claudeToolEnabled, forKey: "toolEnabled.claude")
+      handleToolSelectionChange()
+    }
+  }
   @Published var compactStyle: CompactStyle {
     didSet {
       UserDefaults.standard.set(compactStyle.rawValue, forKey: "compactStyle")
@@ -121,7 +166,7 @@ final class DashboardStore: ObservableObject {
   /// 用 alpha+忽略鼠标而不是 orderOut，保证 SwiftUI 视图继续活着、定时刷新不中断。
   private func applyWindowVisibility() {
     guard let window = NSApp.windows.first(where: { $0.title == "算力码表" }) else { return }
-    let shouldHide = touchBarEnabled && isCompact
+    let shouldHide = touchBarEnabled && isCompact && !clamshellActive
     window.alphaValue = shouldHide ? 0 : 1
     window.ignoresMouseEvents = shouldHide
     if !shouldHide {
@@ -129,6 +174,66 @@ final class DashboardStore: ObservableObject {
     }
   }
 
+  private func updateClamshellState(initial: Bool) {
+    let screens = NSScreen.screens
+    let builtInPresent = screens.contains { screen in
+      guard let id = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID
+      else { return false }
+      return CGDisplayIsBuiltin(id) != 0
+    }
+    let nextValue = !screens.isEmpty && !builtInPresent
+    guard nextValue != clamshellActive || initial else { return }
+    clamshellActive = nextValue
+    applyWindowVisibility()
+
+    // 进入合盖模式时，把浮窗挪到外接屏可见位置（旧坐标可能落在已消失的内建屏上）
+    if nextValue, isCompact,
+       let window = NSApp.windows.first(where: { $0.title == "算力码表" }),
+       let visible = NSScreen.main?.visibleFrame {
+      let size = window.frame.size
+      let origin = NSPoint(
+        x: visible.maxX - size.width - 18,
+        y: visible.maxY - size.height - 18
+      )
+      window.setFrameOrigin(origin)
+    }
+  }
+
+  @Published var touchBarStyle: TouchBarPanelStyle {
+    didSet {
+      UserDefaults.standard.set(touchBarStyle.rawValue, forKey: "touchBarStyle")
+      TouchBarStripController.shared.setPanelStyle(touchBarStyle)
+      updateTouchBar()
+    }
+  }
+  @Published var touchBarShowsPercentSign: Bool {
+    didSet {
+      UserDefaults.standard.set(touchBarShowsPercentSign, forKey: "touchBarShowsPercentSign")
+      TouchBarStripController.shared.setDisplayOptions(
+        showsPercentSign: touchBarShowsPercentSign, showsWindowTags: touchBarShowsWindowTags
+      )
+    }
+  }
+  @Published var touchBarShowsWindowTags: Bool {
+    didSet {
+      UserDefaults.standard.set(touchBarShowsWindowTags, forKey: "touchBarShowsWindowTags")
+      TouchBarStripController.shared.setDisplayOptions(
+        showsPercentSign: touchBarShowsPercentSign, showsWindowTags: touchBarShowsWindowTags
+      )
+    }
+  }
+  @Published var touchBarShowsSessions: Bool {
+    didSet {
+      UserDefaults.standard.set(touchBarShowsSessions, forKey: "touchBarShowsSessions")
+      pushSessionsToTouchBar()
+    }
+  }
+  @Published var touchBarSessionCount: Int {
+    didSet {
+      UserDefaults.standard.set(touchBarSessionCount, forKey: "touchBarSessionCount")
+      pushSessionsToTouchBar()
+    }
+  }
   @Published var touchBarKeepAwake: Bool {
     didSet {
       UserDefaults.standard.set(touchBarKeepAwake, forKey: "touchBarKeepAwake")
@@ -138,6 +243,29 @@ final class DashboardStore: ObservableObject {
 
   var touchBarSupported: Bool {
     TouchBarStripController.shared.isSupported
+  }
+
+  var enabledToolCount: Int {
+    (codexToolEnabled ? 1 : 0) + (claudeToolEnabled ? 1 : 0)
+  }
+
+  /// 展开面板可用的分段：单工具时只有该工具；双工具时含「全部」
+  var enabledToolTabs: [DashboardToolTab] {
+    var tabs: [DashboardToolTab] = []
+    if codexToolEnabled { tabs.append(.codex) }
+    if claudeToolEnabled { tabs.append(.claude) }
+    if tabs.count > 1 { tabs.append(.all) }
+    return tabs
+  }
+
+  private func handleToolSelectionChange() {
+    if !enabledToolTabs.contains(selectedToolTab) {
+      selectedToolTab = enabledToolTabs.first ?? .codex
+    }
+    if !codexToolEnabled { status = nil }
+    if !claudeToolEnabled { claudeStatus = nil }
+    updateTouchBar()
+    refresh()
   }
   @Published var palette: DashboardPalette {
     didSet {
@@ -163,6 +291,10 @@ final class DashboardStore: ObservableObject {
   @Published private(set) var launchWithCodexEnabled = CodexWatcherManager.isEnabled()
   @Published private(set) var settingsMessage: String?
 
+  /// 合盖外接模式：内建屏幕从系统消失（合上盖子 + 外接显示器）。
+  /// 此时 Touch Bar 不可见，即使开了 Touch Bar 模式也要把浮窗放出来。
+  @Published private(set) var clamshellActive = false
+
   private let fastReader = CodexStatusReader()
   private let fullReader = CodexStatusReader()
   private let claudeFastReader = ClaudeStatusReader()
@@ -175,11 +307,30 @@ final class DashboardStore: ObservableObject {
   init() {
     let storedMode = UserDefaults.standard.string(forKey: "compactSizeMode")
     compactSizeMode = storedMode.flatMap(CompactSizeMode.init(rawValue:)) ?? .standard
+    let defaults = UserDefaults.standard
+    if defaults.object(forKey: "toolEnabled.codex") == nil && defaults.object(forKey: "toolEnabled.claude") == nil {
+      let home = FileManager.default.homeDirectoryForCurrentUser
+      let hasCodex = FileManager.default.fileExists(atPath: home.appendingPathComponent(".codex").path)
+      let hasClaude = FileManager.default.fileExists(atPath: home.appendingPathComponent(".claude").path)
+      // 都没装或都装了 → 全开；只装一个 → 只开那个
+      codexToolEnabled = hasCodex || !hasClaude
+      claudeToolEnabled = hasClaude || !hasCodex
+    } else {
+      codexToolEnabled = defaults.object(forKey: "toolEnabled.codex") as? Bool ?? true
+      claudeToolEnabled = defaults.object(forKey: "toolEnabled.claude") as? Bool ?? true
+    }
     let storedStyle = UserDefaults.standard.string(forKey: "compactStyle")
     compactStyle = storedStyle.flatMap(CompactStyle.init(rawValue:)) ?? .rings
     autoDodgeEnabled = UserDefaults.standard.object(forKey: "autoDodgeEnabled") as? Bool ?? false
     touchBarEnabled = UserDefaults.standard.object(forKey: "touchBarEnabled") as? Bool ?? false
     touchBarKeepAwake = UserDefaults.standard.object(forKey: "touchBarKeepAwake") as? Bool ?? false
+    let storedTouchBarStyle = UserDefaults.standard.string(forKey: "touchBarStyle")
+    touchBarStyle = storedTouchBarStyle.flatMap(TouchBarPanelStyle.init(rawValue:)) ?? .barsQuad
+    touchBarShowsPercentSign = UserDefaults.standard.object(forKey: "touchBarShowsPercentSign") as? Bool ?? true
+    touchBarShowsWindowTags = UserDefaults.standard.object(forKey: "touchBarShowsWindowTags") as? Bool ?? true
+    touchBarShowsSessions = UserDefaults.standard.object(forKey: "touchBarShowsSessions") as? Bool ?? true
+    let storedSessionCount = UserDefaults.standard.object(forKey: "touchBarSessionCount") as? Int ?? 3
+    touchBarSessionCount = min(3, max(1, storedSessionCount))
     let storedPalette = UserDefaults.standard.string(forKey: DashboardPalette.userDefaultsKey)
     palette = storedPalette.flatMap(DashboardPalette.init(rawValue:)) ?? .mintDawn
     let storedOpacity = UserDefaults.standard.object(forKey: "compactBackgroundOpacity") as? Double
@@ -196,6 +347,20 @@ final class DashboardStore: ObservableObject {
     }
     TouchBarStripController.shared.setEnabled(touchBarEnabled)
     TouchBarStripController.shared.setKeepAwake(touchBarKeepAwake && touchBarEnabled)
+    updateClamshellState(initial: true)
+    NotificationCenter.default.addObserver(
+      forName: NSApplication.didChangeScreenParametersNotification,
+      object: nil,
+      queue: .main
+    ) { [weak self] _ in
+      Task { @MainActor in
+        self?.updateClamshellState(initial: false)
+      }
+    }
+    TouchBarStripController.shared.setPanelStyle(touchBarStyle)
+    TouchBarStripController.shared.setDisplayOptions(
+      showsPercentSign: touchBarShowsPercentSign, showsWindowTags: touchBarShowsWindowTags
+    )
     DispatchQueue.main.async { [weak self] in
       self?.startAutoRefresh()
     }
@@ -216,9 +381,33 @@ final class DashboardStore: ObservableObject {
       )
     }
     TouchBarStripController.shared.update(
-      codex: toolData(status?.main, letter: "C", c5: palette.fiveHour, c7: palette.weekly),
-      claude: toolData(claudeStatus?.main, letter: "A", c5: palette.claudeFiveHour, c7: palette.claudeWeekly)
+      codex: codexToolEnabled
+        ? toolData(status?.main, letter: "C", c5: palette.fiveHour, c7: palette.weekly)
+        : nil,
+      claude: claudeToolEnabled
+        ? toolData(claudeStatus?.main, letter: "A", c5: palette.claudeFiveHour, c7: palette.claudeWeekly)
+        : nil
     )
+    pushSessionsToTouchBar()
+  }
+
+  /// 后台扫最近会话并推给 Touch Bar（扫描器自带 20 秒缓存）
+  private func pushSessionsToTouchBar() {
+    guard touchBarEnabled else { return }
+    guard touchBarShowsSessions else {
+      TouchBarStripController.shared.updateSessions([])
+      return
+    }
+    let codexOn = codexToolEnabled
+    let claudeOn = claudeToolEnabled
+    let limit = touchBarSessionCount
+    Task.detached(priority: .utility) {
+      let sessions = RecentSessionScanner.shared.recentSessions(limit: limit)
+        .filter { ($0.tool == .codex && codexOn) || ($0.tool == .claude && claudeOn) }
+      await MainActor.run {
+        TouchBarStripController.shared.updateSessions(sessions)
+      }
+    }
   }
 
   var primary: LimitWindow? {
@@ -275,6 +464,11 @@ final class DashboardStore: ObservableObject {
 
   func refresh() {
     guard !isLoading else { return }
+    guard codexToolEnabled else {
+      scheduleFullRefreshIfNeeded()
+      refreshClaudeFast()
+      return
+    }
     isLoading = true
     let reader = fastReader
     NSLog("CodexBalance dashboard fast refresh requested")
@@ -304,6 +498,11 @@ final class DashboardStore: ObservableObject {
       isLoading = false
     }
 
+    refreshClaudeFast()
+  }
+
+  private func refreshClaudeFast() {
+    guard claudeToolEnabled else { return }
     let claudeReader = claudeFastReader
     Task {
       do {
@@ -375,6 +574,10 @@ final class DashboardStore: ObservableObject {
        Date().timeIntervalSince(lastFullRefresh) < 180 {
       return
     }
+    guard codexToolEnabled else {
+      scheduleClaudeFullRefresh()
+      return
+    }
 
     fullRefreshInFlight = true
     let reader = fullReader
@@ -399,6 +602,11 @@ final class DashboardStore: ObservableObject {
       fullRefreshInFlight = false
     }
 
+    scheduleClaudeFullRefresh()
+  }
+
+  private func scheduleClaudeFullRefresh() {
+    guard claudeToolEnabled else { return }
     let claudeReader = claudeFullReader
     Task {
       do {
