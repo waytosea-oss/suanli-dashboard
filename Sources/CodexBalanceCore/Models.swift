@@ -82,12 +82,12 @@ public enum TokenUsageCategory: String, CaseIterable, Identifiable, Sendable {
 
   public var label: String {
     switch self {
-    case .coding: "编程"
-    case .presentation: "PPT/演示"
-    case .imageDesign: "图片/视觉"
-    case .documents: "文档/表格"
-    case .research: "研究浏览"
-    case .other: "其他"
+    case .coding: "编程".coreL10n
+    case .presentation: "PPT/演示".coreL10n
+    case .imageDesign: "图片/视觉".coreL10n
+    case .documents: "文档/表格".coreL10n
+    case .research: "研究浏览".coreL10n
+    case .other: "其他".coreL10n
     }
   }
 }
@@ -120,7 +120,7 @@ public struct RateLimitEvent: Identifiable, Equatable, Sendable {
     reachedType: String? = nil,
     usage: TokenUsage = TokenUsage(),
     usageCategory: TokenUsageCategory = .other,
-    projectName: String = "未知项目",
+    projectName: String = "未知项目".coreL10n,
     projectPath: String = ""
   ) {
     self.timestamp = timestamp
@@ -208,7 +208,7 @@ public struct TokenUsageEvent: Identifiable, Equatable, Sendable {
     outputTokens: Int,
     reasoningOutputTokens: Int,
     category: TokenUsageCategory = .other,
-    projectName: String = "未知项目",
+    projectName: String = "未知项目".coreL10n,
     projectPath: String = ""
   ) {
     self.timestamp = timestamp

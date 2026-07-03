@@ -176,7 +176,7 @@ public final class ClaudeStatusReader: @unchecked Sendable {
     let assistantNeedle = Array(#""type":"assistant""#.utf8)
     var events: [ClaudeUsageEvent] = []
     var currentProjectPath = ""
-    var currentProjectName = "未知项目"
+    var currentProjectName = "未知项目".coreL10n
 
     for lineSlice in text.split(separator: "\n", omittingEmptySubsequences: true) {
       let prefix = lineSlice.prefix(16384)
@@ -323,7 +323,7 @@ public final class ClaudeStatusReader: @unchecked Sendable {
 
   static func projectName(fromPath path: String) -> String {
     let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !trimmed.isEmpty else { return "未知项目" }
+    guard !trimmed.isEmpty else { return "未知项目".coreL10n }
     let name = URL(fileURLWithPath: trimmed).lastPathComponent
     return name.isEmpty ? trimmed : name
   }
@@ -472,10 +472,10 @@ final class ClaudeOAuthUsageSource: @unchecked Sendable {
     return [
       RateLimitEvent(
         timestamp: now,
-        sourceName: "Claude usage 接口",
+        sourceName: "Claude usage 接口".coreL10n,
         sourcePath: "api/oauth/usage",
         limitID: "claude",
-        limitName: "Claude 账号额度",
+        limitName: "Claude 账号额度".coreL10n,
         primary: fiveHour,
         secondary: sevenDay
       )

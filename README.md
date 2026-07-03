@@ -2,6 +2,8 @@
 
 > macOS 悬浮仪表盘：同时监控 **OpenAI Codex** 与 **Claude Code** 的订阅额度余额、Token 消耗与趋势。支持 Touch Bar 常驻显示、多设备 iCloud 同步。
 
+**English**: A macOS floating dashboard that monitors your **OpenAI Codex** and **Claude Code** subscription quota (5-hour & 7-day windows), token usage and multi-device trends — with an always-on Touch Bar panel, recent-session shortcuts, and iCloud sync. The UI follows your system language (10 languages: EN / 简中 / 繁中 / 日 / 한국어 / ES / FR / DE / RU / PT-BR). Download from [Releases](../../releases), unzip, and run `安装并启用自动启动.command` (the installer). Unsigned app: allow it under System Settings → Privacy & Security on first launch.
+
 ![macOS](https://img.shields.io/badge/macOS-14%2B-blue) ![Swift](https://img.shields.io/badge/Swift-6-orange) ![License](https://img.shields.io/badge/license-MIT-green)
 
 ## 它解决什么问题
@@ -22,6 +24,7 @@
 - **多设备 iCloud 同步**：每台 Mac 的消耗各自统计、互相可见，任意台数自动加入趋势对比
 - **自动避让**：可选让浮窗自动挪到屏幕上被遮挡最少的角落
 - **6 套配色主题**，暖色 Codex / 冷色 Claude 永远可区分
+- **10 种界面语言**：跟随系统语言自动切换（简中/繁中/英/日/韩/西/法/德/俄/葡）
 
 ## 安装
 

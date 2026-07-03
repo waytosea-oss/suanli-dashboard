@@ -20,7 +20,7 @@ enum DashboardToolTab: String, CaseIterable, Identifiable, Hashable {
     switch self {
     case .codex: "Codex"
     case .claude: "Claude"
-    case .all: "全部"
+    case .all: "全部".l10n
     }
   }
 }
@@ -36,21 +36,21 @@ enum CompactStyle: String, CaseIterable, Identifiable, Hashable {
 
   var title: String {
     switch self {
-    case .rings: "双环"
-    case .bars: "长条"
-    case .barsQuad: "长条·全"
-    case .badge: "徽章"
-    case .badgeQuad: "徽章·全"
+    case .rings: "双环".l10n
+    case .bars: "长条".l10n
+    case .barsQuad: "长条·全".l10n
+    case .badge: "徽章".l10n
+    case .badgeQuad: "徽章·全".l10n
     }
   }
 
   var subtitle: String {
     switch self {
-    case .rings: "经典同心双环"
-    case .bars: "每工具一条更紧张窗口"
-    case .barsQuad: "每工具 5时+7天 双条"
-    case .badge: "极简数字，占用最小"
-    case .badgeQuad: "四个数字全览"
+    case .rings: "经典同心双环".l10n
+    case .bars: "每工具一条更紧张窗口".l10n
+    case .barsQuad: "每工具 5时+7天 双条".l10n
+    case .badge: "极简数字，占用最小".l10n
+    case .badgeQuad: "四个数字全览".l10n
     }
   }
 }
@@ -66,10 +66,10 @@ enum TouchBarPanelStyle: String, CaseIterable, Identifiable, Hashable {
 
   var title: String {
     switch self {
-    case .barsQuad: "四进度条"
-    case .bars: "双进度条"
-    case .badgeQuad: "四数字"
-    case .badge: "双数字"
+    case .barsQuad: "四进度条".l10n
+    case .bars: "双进度条".l10n
+    case .badgeQuad: "四数字".l10n
+    case .badge: "双数字".l10n
     }
   }
 }
@@ -82,8 +82,8 @@ enum CompactSizeMode: String, CaseIterable, Identifiable, Hashable {
 
   var title: String {
     switch self {
-    case .standard: "标准"
-    case .mini: "迷你"
+    case .standard: "标准".l10n
+    case .mini: "迷你".l10n
     }
   }
 }
@@ -532,10 +532,10 @@ final class DashboardStore: ObservableObject {
     do {
       try CodexWatcherManager.setEnabled(enabled, appURL: Bundle.main.bundleURL)
       launchWithCodexEnabled = CodexWatcherManager.isEnabled()
-      settingsMessage = enabled ? "已开启：打开 Codex 或 Claude Code 时会自动启动算力码表" : "已关闭：不再跟随 Codex / Claude 自动启动"
+      settingsMessage = enabled ? "已开启：打开 Codex 或 Claude Code 时会自动启动算力码表".l10n : "已关闭：不再跟随 Codex / Claude 自动启动".l10n
     } catch {
       launchWithCodexEnabled = CodexWatcherManager.isEnabled()
-      settingsMessage = "设置失败：\(error.localizedDescription)"
+      settingsMessage = L("设置失败：%@", error.localizedDescription)
     }
   }
 
@@ -544,11 +544,11 @@ final class DashboardStore: ObservableObject {
       try CodexWatcherManager.refreshIfEnabled(appURL: Bundle.main.bundleURL)
       launchWithCodexEnabled = CodexWatcherManager.isEnabled()
       if showMessage, launchWithCodexEnabled {
-        settingsMessage = "已修复：自动启动会打开当前这个算力码表"
+        settingsMessage = "已修复：自动启动会打开当前这个算力码表".l10n
       }
     } catch {
       launchWithCodexEnabled = CodexWatcherManager.isEnabled()
-      settingsMessage = "自动启动修复失败：\(error.localizedDescription)"
+      settingsMessage = L("自动启动修复失败：%@", error.localizedDescription)
     }
   }
 

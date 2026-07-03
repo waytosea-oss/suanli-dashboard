@@ -43,10 +43,10 @@ struct CompactBarsView: View {
         VStack {
           HStack {
             Spacer()
-            hoverButton(systemImage: "arrow.clockwise", help: "刷新") {
+            hoverButton(systemImage: "arrow.clockwise", help: "刷新".l10n) {
               store.refresh()
             }
-            hoverButton(systemImage: "arrow.up.left.and.arrow.down.right", help: "展开") {
+            hoverButton(systemImage: "arrow.up.left.and.arrow.down.right", help: "展开".l10n) {
               store.isCompact = false
             }
           }
@@ -62,7 +62,7 @@ struct CompactBarsView: View {
     .onHover { hovering in
       withAnimation(.easeInOut(duration: 0.12)) { isHovering = hovering }
     }
-    .help("点击展开完整面板")
+    .help("点击展开完整面板".l10n)
   }
 
   /// 非 quad：一条「更紧张窗口」；quad：5时/7天各一条（第二条不重复字母章）
@@ -80,7 +80,7 @@ struct CompactBarsView: View {
         letter: letter,
         window: primary,
         color: primaryColor,
-        windowTag: "5时",
+        windowTag: "5时".l10n,
         countdownMode: .hours,
         unavailable: unavailable
       )
@@ -88,7 +88,7 @@ struct CompactBarsView: View {
         letter: "",
         window: secondary,
         color: secondaryColor,
-        windowTag: "7天",
+        windowTag: "7天".l10n,
         countdownMode: .days,
         unavailable: unavailable
       )
@@ -98,7 +98,7 @@ struct CompactBarsView: View {
         letter: letter,
         window: tighterIsPrimary ? primary : secondary,
         color: tighterIsPrimary ? primaryColor : secondaryColor,
-        windowTag: tighterIsPrimary ? "5时" : "7天",
+        windowTag: tighterIsPrimary ? "5时".l10n : "7天".l10n,
         countdownMode: tighterIsPrimary ? .hours : .days,
         unavailable: unavailable
       )
@@ -232,9 +232,9 @@ struct CompactBadgeView: View {
 
   private var badgeHelpText: String {
     func describe(_ name: String, _ primary: LimitWindow?, _ secondary: LimitWindow?, unavailable: Bool) -> String {
-      guard !unavailable else { return "\(name): 暂无数据" }
-      let p = primary.map { "5时 \(Int($0.remainingPercent.rounded()))%" } ?? "5时 --"
-      let s = secondary.map { "7天 \(Int($0.remainingPercent.rounded()))%" } ?? "7天 --"
+      guard !unavailable else { return L("%@: 暂无数据", name) }
+      let p = primary.map { L("5时 %d%%", Int($0.remainingPercent.rounded())) } ?? L("5时 %@", "--")
+      let s = secondary.map { L("7天 %d%%", Int($0.remainingPercent.rounded())) } ?? L("7天 %@", "--")
       return "\(name): \(p) · \(s)"
     }
     return describe("Codex", store.primary, store.secondary, unavailable: store.status?.main == nil)
@@ -290,7 +290,7 @@ private struct ToolBarRow: View {
           .font(.system(size: 11, weight: .heavy, design: .rounded))
           .monospacedDigit()
           .foregroundStyle(unavailable ? DashboardColors.subtleText : color)
-        Text(unavailable ? "暂无" : "\(windowTag) \(BalanceFormatters.resetCountdownShort(window?.resetsAt, mode: countdownMode))")
+        Text(unavailable ? "暂无".l10n : "\(windowTag) \(BalanceFormatters.resetCountdownShort(window?.resetsAt, mode: countdownMode))")
           .font(.system(size: 7.5, weight: .bold, design: .rounded))
           .monospacedDigit()
           .foregroundStyle(DashboardColors.subtleText)
@@ -300,7 +300,7 @@ private struct ToolBarRow: View {
       .minimumScaleFactor(0.7)
     }
     .frame(height: 19)
-    .help(unavailable ? "暂无数据" : "\(windowTag) 剩余 \(Int((window?.remainingPercent ?? 0).rounded()))% · 重置 \(BalanceFormatters.resetCountdownShort(window?.resetsAt, mode: countdownMode))")
+    .help(unavailable ? "暂无数据".l10n : L("%@ 剩余 %d%% · 重置 %@", windowTag.l10n, Int((window?.remainingPercent ?? 0).rounded()), BalanceFormatters.resetCountdownShort(window?.resetsAt, mode: countdownMode)))
   }
 }
 

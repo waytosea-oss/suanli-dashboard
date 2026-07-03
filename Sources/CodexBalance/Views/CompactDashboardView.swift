@@ -137,7 +137,7 @@ struct CompactRingsView: View {
       store.selectedToolTab = tab
       store.isCompact = false
     }
-    .help("展开并查看 \(label) 分区")
+    .help(L("展开并查看 %@ 分区", label))
   }
 
   private var refreshButton: some View {
@@ -157,7 +157,7 @@ struct CompactRingsView: View {
       .overlay(RoundedRectangle(cornerRadius: isMini ? 7 : 8, style: .continuous).stroke(.white.opacity(0.10), lineWidth: 1))
     }
     .buttonStyle(.plain)
-    .help("刷新")
+    .help("刷新".l10n)
   }
 
   private var expandButton: some View {
@@ -172,7 +172,7 @@ struct CompactRingsView: View {
         .overlay(RoundedRectangle(cornerRadius: isMini ? 7 : 8, style: .continuous).stroke(.white.opacity(0.10), lineWidth: 1))
     }
     .buttonStyle(.plain)
-    .help("展开")
+    .help("展开".l10n)
   }
 
   private func resetText(_ date: Date?, mode: CountdownMode) -> String {

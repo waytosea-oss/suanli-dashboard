@@ -50,21 +50,21 @@ struct ExpandedDashboardView: View {
               primaryTint: palette.claudeFiveHour,
               secondaryTint: palette.claudeWeekly,
               showsTotalScope: false,
-              boardCaption: "本机日志口径含 cache_read · 不含网页 Chat / Cowork 消耗"
+              boardCaption: "本机日志口径含 cache_read · 不含网页 Chat / Cowork 消耗".l10n
             )
             claudeRecentEvents
           case .all:
             allGaugePanel
             allSummaryBoard
-            TokenStatsView(stats: store.tokenStats, palette: palette, boardTitle: "Codex · Token 消耗看板")
+            TokenStatsView(stats: store.tokenStats, palette: palette, boardTitle: "Codex · Token 消耗看板".l10n)
             TokenStatsView(
               stats: store.claudeTokenStats,
               palette: palette,
               primaryTint: palette.claudeFiveHour,
               secondaryTint: palette.claudeWeekly,
               showsTotalScope: false,
-              boardTitle: "Claude · Token 消耗看板",
-              boardCaption: "本机日志口径含 cache_read · 不含网页 Chat / Cowork 消耗"
+              boardTitle: "Claude · Token 消耗看板".l10n,
+              boardCaption: "本机日志口径含 cache_read · 不含网页 Chat / Cowork 消耗".l10n
             )
           }
         }
@@ -95,35 +95,35 @@ struct ExpandedDashboardView: View {
           showSettings.toggle()
         }
       } label: {
-        Label("设置", systemImage: "gearshape.fill")
+        Label("设置".l10n, systemImage: "gearshape.fill")
           .font(.system(size: 13, weight: .bold))
       }
       .buttonStyle(ToolButtonStyle(isSelected: showSettings))
-      .help("打开设置")
+      .help("打开设置".l10n)
 
       Button {
         store.isCompact = true
       } label: {
-        Label("收起", systemImage: "arrow.down.right.and.arrow.up.left")
+        Label("收起".l10n, systemImage: "arrow.down.right.and.arrow.up.left")
           .font(.system(size: 13, weight: .bold))
       }
       .buttonStyle(ToolButtonStyle())
-      .help("收起浮窗")
+      .help("收起浮窗".l10n)
     }
   }
 
   private var headerSubtitle: String {
     if let errorMessage = store.errorMessage {
-      return "读取失败: \(errorMessage)"
+      return L("读取失败: %@", errorMessage)
     }
-    guard let status = store.status else { return "正在扫描本地 Codex 会话日志" }
+    guard let status = store.status else { return "正在扫描本地 Codex 会话日志".l10n }
     guard let latestEvent = status.main else {
-      return "\(status.scannedFiles) 个日志文件 · 没有余额事件 · 在这台 Mac 的 Codex 输入 /status"
+      return L("%d 个日志文件 · 没有余额事件 · 在这台 Mac 的 Codex 输入 /status", status.scannedFiles)
     }
     if latestEvent.sourceName == "Codex app-server" {
-      return "实时读取 Codex app-server · \(BalanceFormatters.dateTime(latestEvent.timestamp))"
+      return L("实时读取 Codex app-server · %@", BalanceFormatters.dateTime(latestEvent.timestamp))
     }
-    return "\(status.scannedFiles) 个日志文件 · 最新余额 \(BalanceFormatters.relativeAge(latestEvent.timestamp)) · \(BalanceFormatters.dateTime(latestEvent.timestamp))"
+    return L("%d 个日志文件 · 最新余额 %@ · %@", status.scannedFiles, BalanceFormatters.relativeAge(latestEvent.timestamp), BalanceFormatters.dateTime(latestEvent.timestamp))
   }
 
   private var toolTabPicker: some View {
@@ -218,32 +218,32 @@ struct ExpandedDashboardView: View {
 
   private var claudeFreshnessText: String {
     guard let event = store.claudeStatus?.main else {
-      return "暂无数据 · 本机未读到 Claude 余额来源"
+      return "暂无数据 · 本机未读到 Claude 余额来源".l10n
     }
-    return "实时读取 \(event.sourceName) · \(BalanceFormatters.dateTime(event.timestamp))"
+    return L("实时读取 %@ · %@", event.sourceName, BalanceFormatters.dateTime(event.timestamp))
   }
 
   private var claudeOverviewCards: some View {
     HStack(spacing: 12) {
       MiniMetricCard(
-        title: "5 小时余额",
+        title: "5 小时余额".l10n,
         value: store.claudeBalanceAvailable ? BalanceFormatters.percent(store.claudePrimary?.remainingPercent) : "--",
         tint: palette.claudeFiveHour,
-        footnote: store.claudeBalanceAvailable ? "已用 \(BalanceFormatters.percent(store.claudePrimary?.usedPercent))" : "暂无数据",
+        footnote: store.claudeBalanceAvailable ? L("已用 %@", BalanceFormatters.percent(store.claudePrimary?.usedPercent)) : "暂无数据".l10n,
         surface: palette.panelRaised
       )
       MiniMetricCard(
-        title: "7 天余额",
+        title: "7 天余额".l10n,
         value: store.claudeBalanceAvailable ? BalanceFormatters.percent(store.claudeSecondary?.remainingPercent) : "--",
         tint: palette.claudeWeekly,
-        footnote: store.claudeBalanceAvailable ? "已用 \(BalanceFormatters.percent(store.claudeSecondary?.usedPercent))" : "暂无数据",
+        footnote: store.claudeBalanceAvailable ? L("已用 %@", BalanceFormatters.percent(store.claudeSecondary?.usedPercent)) : "暂无数据".l10n,
         surface: palette.panelRaised
       )
       MiniMetricCard(
-        title: "今日 Token",
+        title: "今日 Token".l10n,
         value: BalanceFormatters.compactNumber(store.claudeTokenStats.todayTokens),
         tint: DashboardColors.text,
-        footnote: "本月 \(BalanceFormatters.compactNumber(store.claudeTokenStats.monthTokens))",
+        footnote: L("本月 %@", BalanceFormatters.compactNumber(store.claudeTokenStats.monthTokens)),
         surface: palette.panelRaised
       )
     }
@@ -251,11 +251,11 @@ struct ExpandedDashboardView: View {
 
   private var claudeRecentEvents: some View {
     VStack(alignment: .leading, spacing: 10) {
-      Text("最近余额事件")
+      Text("最近余额事件".l10n)
         .font(.system(size: 14, weight: .heavy))
         .foregroundStyle(DashboardColors.text)
       if (store.claudeStatus?.recentEvents.isEmpty ?? true) {
-        Text("暂无数据 · Claude 余额事件依赖本机 OAuth 凭据")
+        Text("暂无数据 · Claude 余额事件依赖本机 OAuth 凭据".l10n)
           .font(.system(size: 12, weight: .semibold))
           .foregroundStyle(DashboardColors.subtleText)
       } else {
@@ -375,7 +375,7 @@ struct ExpandedDashboardView: View {
           secondaryTint: palette.claudeWeekly
         )
       }
-      Text("两个工具的 token 口径不同，不相加")
+      Text("两个工具的 token 口径不同，不相加".l10n)
         .font(.system(size: 10.5, weight: .semibold))
         .foregroundStyle(DashboardColors.subtleText)
         .frame(maxWidth: .infinity, alignment: .trailing)
@@ -455,14 +455,14 @@ struct ExpandedDashboardView: View {
 
   private var freshnessText: String? {
     guard let event = store.status?.main else {
-      return "无余额事件"
+      return "无余额事件".l10n
     }
     if event.sourceName == "Codex app-server" {
       return nil
     }
     let age = Date().timeIntervalSince(event.timestamp)
     guard age > 10 * 60 else { return nil }
-    return "旧数据 \(BalanceFormatters.relativeAge(event.timestamp))，请在 Codex 输入 /status"
+    return L("旧数据 %@，请在 Codex 输入 /status", BalanceFormatters.relativeAge(event.timestamp))
   }
 
   private func resetCorner(value: String, tint: Color, alignment: Alignment) -> some View {
@@ -492,24 +492,24 @@ struct ExpandedDashboardView: View {
   private var overviewCards: some View {
     HStack(spacing: 12) {
       MiniMetricCard(
-        title: "5 小时余额",
+        title: "5 小时余额".l10n,
         value: BalanceFormatters.percent(store.primary?.remainingPercent),
         tint: palette.fiveHour,
-        footnote: "已用 \(BalanceFormatters.percent(store.primary?.usedPercent))",
+        footnote: L("已用 %@", BalanceFormatters.percent(store.primary?.usedPercent)),
         surface: palette.panelRaised
       )
       MiniMetricCard(
-        title: "7 天余额",
+        title: "7 天余额".l10n,
         value: BalanceFormatters.percent(store.secondary?.remainingPercent),
         tint: palette.weekly,
-        footnote: "已用 \(BalanceFormatters.percent(store.secondary?.usedPercent))",
+        footnote: L("已用 %@", BalanceFormatters.percent(store.secondary?.usedPercent)),
         surface: palette.panelRaised
       )
       MiniMetricCard(
-        title: "今日 Token",
+        title: "今日 Token".l10n,
         value: BalanceFormatters.compactNumber(store.tokenStats.todayTokens),
         tint: DashboardColors.text,
-        footnote: "本月 \(BalanceFormatters.compactNumber(store.tokenStats.monthTokens))",
+        footnote: L("本月 %@", BalanceFormatters.compactNumber(store.tokenStats.monthTokens)),
         surface: palette.panelRaised
       )
     }
@@ -518,16 +518,16 @@ struct ExpandedDashboardView: View {
   private var settingsPanel: some View {
     VStack(alignment: .leading, spacing: 14) {
       HStack(alignment: .firstTextBaseline, spacing: 8) {
-        Label("设置", systemImage: "gearshape.fill")
+        Label("设置".l10n, systemImage: "gearshape.fill")
           .font(.system(size: 15, weight: .heavy))
           .foregroundStyle(DashboardColors.text)
         Spacer()
-        Text("外观与运行")
+        Text("外观与运行".l10n)
           .font(.system(size: 11.5, weight: .bold))
           .foregroundStyle(DashboardColors.subtleText)
       }
 
-      settingsSection(title: "监控工具", systemImage: "wrench.and.screwdriver.fill") {
+      settingsSection(title: "监控工具".l10n, systemImage: "wrench.and.screwdriver.fill") {
         HStack(spacing: 8) {
           toolChip(
             title: "Codex",
@@ -546,13 +546,13 @@ struct ExpandedDashboardView: View {
             store.claudeToolEnabled.toggle()
           }
         }
-        Text("按你实际使用的工具勾选，浮窗、Touch Bar 和面板都会跟随；至少保留一个")
+        Text("按你实际使用的工具勾选，浮窗、Touch Bar 和面板都会跟随；至少保留一个".l10n)
           .font(.system(size: 10.5, weight: .semibold))
           .foregroundStyle(DashboardColors.subtleText)
       }
 
-      settingsSection(title: "外观", systemImage: "slider.horizontal.3") {
-        settingsRow(title: "收起透明度", subtitle: "调整浮窗底板通透程度") {
+      settingsSection(title: "外观".l10n, systemImage: "slider.horizontal.3") {
+        settingsRow(title: "收起透明度".l10n, subtitle: "调整浮窗底板通透程度".l10n) {
           HStack(spacing: 10) {
             Slider(
               value: Binding(
@@ -574,10 +574,10 @@ struct ExpandedDashboardView: View {
 
         VStack(alignment: .leading, spacing: 8) {
           VStack(alignment: .leading, spacing: 2) {
-            Text("悬浮样式")
+            Text("悬浮样式".l10n)
               .font(.system(size: 12, weight: .heavy))
               .foregroundStyle(DashboardColors.text)
-            Text("占用面积依次更小")
+            Text("占用面积依次更小".l10n)
               .font(.system(size: 10.5, weight: .semibold))
               .foregroundStyle(DashboardColors.subtleText)
           }
@@ -596,7 +596,7 @@ struct ExpandedDashboardView: View {
           }
         }
 
-        settingsRow(title: "自动避让", subtitle: "自动把浮窗挪到屏幕上被遮挡最少的角落") {
+        settingsRow(title: "自动避让".l10n, subtitle: "自动把浮窗挪到屏幕上被遮挡最少的角落".l10n) {
           Toggle("", isOn: Binding(
             get: { store.autoDodgeEnabled },
             set: { store.autoDodgeEnabled = $0 }
@@ -606,7 +606,7 @@ struct ExpandedDashboardView: View {
           .controlSize(.small)
         }
 
-        settingsRow(title: "收起尺寸", subtitle: "选择标准或迷你浮窗") {
+        settingsRow(title: "收起尺寸".l10n, subtitle: "选择标准或迷你浮窗".l10n) {
           HStack(spacing: 8) {
             ForEach(CompactSizeMode.allCases) { mode in
               SizeModeCard(
@@ -620,7 +620,7 @@ struct ExpandedDashboardView: View {
           }
         }
 
-        settingsRow(title: "刷新频率", subtitle: "余额自动更新间隔") {
+        settingsRow(title: "刷新频率".l10n, subtitle: "余额自动更新间隔".l10n) {
           HStack(spacing: 8) {
             Picker("", selection: Binding(
               get: { store.refreshIntervalOption },
@@ -651,12 +651,12 @@ struct ExpandedDashboardView: View {
                     .stroke(Color.white.opacity(0.08), lineWidth: 1)
                 )
             )
-            .help("立即刷新")
+            .help("立即刷新".l10n)
           }
         }
       }
 
-      settingsSection(title: "配色", systemImage: "paintpalette.fill") {
+      settingsSection(title: "配色".l10n, systemImage: "paintpalette.fill") {
         LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
           ForEach(DashboardPalette.allCases) { palette in
             PaletteButton(
@@ -671,7 +671,7 @@ struct ExpandedDashboardView: View {
         }
       }
 
-      settingsSection(title: "运行", systemImage: "bolt.fill") {
+      settingsSection(title: "运行".l10n, systemImage: "bolt.fill") {
         Button {
           store.setLaunchWithCodexEnabled(!store.launchWithCodexEnabled)
         } label: {
@@ -682,17 +682,17 @@ struct ExpandedDashboardView: View {
               .frame(width: 20)
 
             VStack(alignment: .leading, spacing: 3) {
-              Text("打开 Codex / Claude 时自动启动")
+              Text("打开 Codex / Claude 时自动启动".l10n)
                 .font(.system(size: 12.5, weight: .heavy))
                 .foregroundStyle(DashboardColors.text)
-              Text("Codex 或 Claude Code 运行时自动唤起算力码表")
+              Text("Codex 或 Claude Code 运行时自动唤起算力码表".l10n)
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(DashboardColors.subtleText)
             }
 
             Spacer(minLength: 8)
 
-            Text(store.launchWithCodexEnabled ? "已开启" : "已关闭")
+            Text(store.launchWithCodexEnabled ? "已开启".l10n : "已关闭".l10n)
               .font(.system(size: 11.5, weight: .heavy))
               .foregroundStyle(store.launchWithCodexEnabled ? palette.weekly : DashboardColors.subtleText)
               .padding(.horizontal, 9)
@@ -713,7 +713,7 @@ struct ExpandedDashboardView: View {
                 .stroke(Color.white.opacity(0.08), lineWidth: 1)
             )
         )
-        .help("切换打开 Codex / Claude 时自动启动")
+        .help("切换打开 Codex / Claude 时自动启动".l10n)
 
         Button {
           store.touchBarEnabled.toggle()
@@ -725,19 +725,19 @@ struct ExpandedDashboardView: View {
               .frame(width: 20)
 
             VStack(alignment: .leading, spacing: 3) {
-              Text("Touch Bar 常驻余额")
+              Text("Touch Bar 常驻余额".l10n)
                 .font(.system(size: 12.5, weight: .heavy))
                 .foregroundStyle(DashboardColors.text)
               Text(store.touchBarSupported
-                ? "在 Touch Bar 右侧常显 C/A 余额，点按唤出面板"
-                : "本机不支持 Touch Bar")
+                ? "在 Touch Bar 右侧常显 C/A 余额，点按唤出面板".l10n
+                : "本机不支持 Touch Bar".l10n)
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(DashboardColors.subtleText)
             }
 
             Spacer(minLength: 8)
 
-            Text(store.touchBarEnabled ? "已开启" : "已关闭")
+            Text(store.touchBarEnabled ? "已开启".l10n : "已关闭".l10n)
               .font(.system(size: 11.5, weight: .heavy))
               .foregroundStyle(store.touchBarEnabled ? palette.weekly : DashboardColors.subtleText)
               .padding(.horizontal, 9)
@@ -760,7 +760,7 @@ struct ExpandedDashboardView: View {
         )
         .disabled(!store.touchBarSupported)
         .opacity(store.touchBarSupported ? 1 : 0.5)
-        .help("在 Touch Bar Control Strip 常驻显示两个工具的余额")
+        .help("在 Touch Bar Control Strip 常驻显示两个工具的余额".l10n)
 
         if store.touchBarEnabled {
           Button {
@@ -773,17 +773,17 @@ struct ExpandedDashboardView: View {
                 .frame(width: 20)
 
               VStack(alignment: .leading, spacing: 3) {
-                Text("Touch Bar 保持常亮")
+                Text("Touch Bar 保持常亮".l10n)
                   .font(.system(size: 12.5, weight: .heavy))
                   .foregroundStyle(DashboardColors.text)
-                Text("阻止 Touch Bar 息屏；主屏幕也不会自动休眠，用电池时注意续航")
+                Text("阻止 Touch Bar 息屏；主屏幕也不会自动休眠，用电池时注意续航".l10n)
                   .font(.system(size: 11, weight: .semibold))
                   .foregroundStyle(DashboardColors.subtleText)
               }
 
               Spacer(minLength: 8)
 
-              Text(store.touchBarKeepAwake ? "已开启" : "已关闭")
+              Text(store.touchBarKeepAwake ? "已开启".l10n : "已关闭".l10n)
                 .font(.system(size: 11.5, weight: .heavy))
                 .foregroundStyle(store.touchBarKeepAwake ? palette.weekly : DashboardColors.subtleText)
                 .padding(.horizontal, 9)
@@ -804,9 +804,9 @@ struct ExpandedDashboardView: View {
                   .stroke(Color.white.opacity(0.08), lineWidth: 1)
               )
           )
-          .help("周期性向系统申报用户活跃，保持 Touch Bar 常亮")
+          .help("周期性向系统申报用户活跃，保持 Touch Bar 常亮".l10n)
 
-          settingsRow(title: "显示 % 号", subtitle: "熟悉后可关掉，数字更大更干净") {
+          settingsRow(title: "显示 % 号", subtitle: "熟悉后可关掉，数字更大更干净".l10n) {
             Toggle("", isOn: Binding(
               get: { store.touchBarShowsPercentSign },
               set: { store.touchBarShowsPercentSign = $0 }
@@ -816,7 +816,7 @@ struct ExpandedDashboardView: View {
             .controlSize(.small)
           }
 
-          settingsRow(title: "显示 5时/7天 标签", subtitle: "关闭后只留数值本身") {
+          settingsRow(title: "显示 5时/7天 标签".l10n, subtitle: "关闭后只留数值本身".l10n) {
             Toggle("", isOn: Binding(
               get: { store.touchBarShowsWindowTags },
               set: { store.touchBarShowsWindowTags = $0 }
@@ -826,7 +826,7 @@ struct ExpandedDashboardView: View {
             .controlSize(.small)
           }
 
-          settingsRow(title: "显示最近会话", subtitle: "余额右侧显示最近 AI 会话，点击直达对应 App") {
+          settingsRow(title: "显示最近会话".l10n, subtitle: "余额右侧显示最近 AI 会话，点击直达对应 App".l10n) {
             Toggle("", isOn: Binding(
               get: { store.touchBarShowsSessions },
               set: { store.touchBarShowsSessions = $0 }
@@ -837,14 +837,14 @@ struct ExpandedDashboardView: View {
           }
 
           if store.touchBarShowsSessions {
-            settingsRow(title: "会话数量", subtitle: "显示 1 个时字最大，一眼看清") {
+            settingsRow(title: "会话数量".l10n, subtitle: "显示 1 个时字最大，一眼看清".l10n) {
               Picker("", selection: Binding(
                 get: { store.touchBarSessionCount },
                 set: { store.touchBarSessionCount = $0 }
               )) {
-                Text("1 个").tag(1)
-                Text("2 个").tag(2)
-                Text("3 个").tag(3)
+                Text("1 个".l10n).tag(1)
+                Text("2 个".l10n).tag(2)
+                Text("3 个".l10n).tag(3)
               }
               .labelsHidden()
               .pickerStyle(.segmented)
@@ -852,7 +852,7 @@ struct ExpandedDashboardView: View {
             }
           }
 
-          settingsRow(title: "Touch Bar 样式", subtitle: "全宽面板的呈现方式") {
+          settingsRow(title: "Touch Bar 样式".l10n, subtitle: "全宽面板的呈现方式".l10n) {
             Picker("", selection: Binding(
               get: { store.touchBarStyle },
               set: { store.touchBarStyle = $0 }
@@ -875,17 +875,17 @@ struct ExpandedDashboardView: View {
         }
       }
       HStack(spacing: 6) {
-        Text("算力码表 suanli-dashboard")
+        Text("算力码表 suanli-dashboard".l10n)
           .font(.system(size: 10.5, weight: .heavy))
           .foregroundStyle(DashboardColors.subtleText)
         Text("·")
           .foregroundStyle(DashboardColors.subtleText)
-        Text("作者 Tilo Liang")
+        Text("作者 Tilo Liang".l10n)
           .font(.system(size: 10.5, weight: .heavy))
           .foregroundStyle(DashboardColors.text.opacity(0.85))
         Text("·")
           .foregroundStyle(DashboardColors.subtleText)
-        Text("MIT 开源")
+        Text("MIT 开源".l10n)
           .font(.system(size: 10.5, weight: .semibold))
           .foregroundStyle(DashboardColors.subtleText)
         Spacer()
@@ -899,7 +899,7 @@ struct ExpandedDashboardView: View {
         }
         .buttonStyle(.plain)
         .foregroundStyle(DashboardColors.subtleText)
-        .help("打开项目主页")
+        .help("打开项目主页".l10n)
       }
       .padding(.top, 2)
     }
@@ -949,7 +949,7 @@ struct ExpandedDashboardView: View {
       )
     }
     .buttonStyle(.plain)
-    .help(isOn ? "点击停用 \(title) 监控" : "点击启用 \(title) 监控")
+    .help(isOn ? L("点击停用 %@ 监控", title) : L("点击启用 %@ 监控", title))
   }
 
   private func settingsSection<Content: View>(
@@ -998,7 +998,7 @@ struct ExpandedDashboardView: View {
 
   private var recentEvents: some View {
     VStack(alignment: .leading, spacing: 10) {
-      Text("最近余额事件")
+      Text("最近余额事件".l10n)
         .font(.system(size: 14, weight: .heavy))
         .foregroundStyle(DashboardColors.text)
       LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
@@ -1029,7 +1029,7 @@ private struct TokenStatsView: View {
   var primaryTint: Color?
   var secondaryTint: Color?
   var showsTotalScope = true
-  var boardTitle = "Token 消耗看板"
+  var boardTitle = "Token 消耗看板".l10n
   var boardCaption: String?
 
   private var tintA: Color { primaryTint ?? palette.fiveHour }
@@ -1048,7 +1048,7 @@ private struct TokenStatsView: View {
           .font(.system(size: 16, weight: .heavy))
           .foregroundStyle(DashboardColors.text)
         Spacer()
-        Text("样本 \(stats.sampleCount)")
+        Text(L("样本 %d", stats.sampleCount))
           .font(.system(size: 12, weight: .semibold))
           .foregroundStyle(DashboardColors.subtleText)
       }
@@ -1117,17 +1117,17 @@ private struct TokenCategoryBoard: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
       HStack(alignment: .firstTextBaseline) {
-        Text("本月用途分布")
+        Text("本月用途分布".l10n)
           .font(.system(size: 14, weight: .heavy))
           .foregroundStyle(DashboardColors.text)
         Spacer()
-        Text("本月 \(BalanceFormatters.compactNumber(distributionTotal))")
+        Text(L("本月 %@", BalanceFormatters.compactNumber(distributionTotal)))
           .font(.system(size: 10.5, weight: .bold))
           .foregroundStyle(DashboardColors.subtleText)
       }
 
       if visibleBuckets.isEmpty {
-        Text("暂无可归类的本月 token 数据")
+        Text("暂无可归类的本月 token 数据".l10n)
           .font(.system(size: 12, weight: .semibold))
           .foregroundStyle(DashboardColors.subtleText)
           .frame(maxWidth: .infinity, minHeight: 72, alignment: .center)
@@ -1142,11 +1142,11 @@ private struct TokenCategoryBoard: View {
 
           VStack(alignment: .leading, spacing: 5) {
             HStack {
-              Text("用途")
+              Text("用途".l10n)
                 .frame(maxWidth: .infinity, alignment: .leading)
-              Text("消耗")
+              Text("消耗".l10n)
                 .frame(width: 88, alignment: .trailing)
-              Text("占比")
+              Text("占比".l10n)
                 .frame(width: 42, alignment: .trailing)
             }
             .font(.system(size: 10.5, weight: .bold))
@@ -1160,7 +1160,7 @@ private struct TokenCategoryBoard: View {
               )
             }
 
-            Text("按本月 token 事件上下文推断")
+            Text("按本月 token 事件上下文推断".l10n)
               .font(.system(size: 10.5, weight: .semibold))
               .foregroundStyle(DashboardColors.subtleText)
               .frame(maxWidth: .infinity, alignment: .trailing)
@@ -1240,7 +1240,7 @@ private struct CategoryPieChart: View {
         )
 
       VStack(spacing: 3) {
-        Text("本月")
+        Text("本月".l10n)
           .font(.system(size: 10.5, weight: .bold))
           .foregroundStyle(DashboardColors.subtleText)
         Text(BalanceFormatters.compactNumber(total))
@@ -1337,24 +1337,24 @@ private struct TokenTopProjectsBoard: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
       HStack(alignment: .firstTextBaseline) {
-        Text("项目消耗 Top 3")
+        Text("项目消耗 Top 3".l10n)
           .font(.system(size: 14, weight: .heavy))
           .foregroundStyle(DashboardColors.text)
         Spacer()
-        Text("优先显示项目别名")
+        Text("优先显示项目别名".l10n)
           .font(.system(size: 10.5, weight: .bold))
           .foregroundStyle(DashboardColors.subtleText)
       }
 
       VStack(spacing: 10) {
         ProjectRankStrip(
-          title: "今日",
+          title: "今日".l10n,
           projects: todayProjects,
           total: todayTotal,
           tint: primaryTint ?? palette.fiveHour
         )
         ProjectRankStrip(
-          title: "本月",
+          title: "本月".l10n,
           projects: monthProjects,
           total: monthTotal,
           tint: secondaryTint ?? palette.weekly
@@ -1391,7 +1391,7 @@ private struct ProjectRankStrip: View {
 
       HStack(spacing: 8) {
         if projects.isEmpty {
-          Text("暂无数据")
+          Text("暂无数据".l10n)
             .font(.system(size: 12, weight: .semibold))
             .foregroundStyle(DashboardColors.subtleText)
             .frame(maxWidth: .infinity, minHeight: 58, alignment: .center)
@@ -1460,9 +1460,9 @@ private struct TokenSummaryStrip: View {
 
   var body: some View {
     HStack(spacing: 8) {
-      TokenSummaryPill(title: "今日", value: stats.todayTokens, tint: primaryTint ?? palette.fiveHour)
-      TokenSummaryPill(title: "近 7 天", value: stats.last7DaysTokens, tint: secondaryTint ?? palette.weekly)
-      TokenSummaryPill(title: "本月", value: stats.monthTokens, tint: DashboardColors.text)
+      TokenSummaryPill(title: "今日".l10n, value: stats.todayTokens, tint: primaryTint ?? palette.fiveHour)
+      TokenSummaryPill(title: "近 7 天".l10n, value: stats.last7DaysTokens, tint: secondaryTint ?? palette.weekly)
+      TokenSummaryPill(title: "本月".l10n, value: stats.monthTokens, tint: DashboardColors.text)
     }
   }
 }
@@ -1509,15 +1509,15 @@ private enum TokenTrendPeriod: String, CaseIterable, Identifiable {
 
   var title: String {
     switch self {
-    case .daily: "按天"
-    case .monthly: "按月"
+    case .daily: "按天".l10n
+    case .monthly: "按月".l10n
     }
   }
 
   var subtitle: String {
     switch self {
-    case .daily: "最近 14 天"
-    case .monthly: "最近 6 个月"
+    case .daily: "最近 14 天".l10n
+    case .monthly: "最近 6 个月".l10n
     }
   }
 }
@@ -1569,10 +1569,10 @@ private struct TokenTrendPanel: View {
       TokenTrendScopeInfo(id: $0.deviceID, title: $0.deviceName, isTotal: false)
     }
     if scopes.isEmpty {
-      scopes = [TokenTrendScopeInfo(id: "local", title: "当前设备", isTotal: false)]
+      scopes = [TokenTrendScopeInfo(id: "local", title: "当前设备".l10n, isTotal: false)]
     }
     if showsTotalScope {
-      scopes.append(TokenTrendScopeInfo(id: "total", title: "总算力", isTotal: true))
+      scopes.append(TokenTrendScopeInfo(id: "total", title: "总算力".l10n, isTotal: true))
     }
     return scopes
   }
@@ -1613,8 +1613,8 @@ private struct TokenTrendPanel: View {
 
   private var subtitle: String {
     stats.deviceUsage.count <= 1
-      ? "\(selectedPeriod.subtitle) · 其他设备打开码表后自动加入对比"
-      : "\(selectedPeriod.subtitle) · iCloud 可多选对比"
+      ? L("%@ · 其他设备打开码表后自动加入对比", selectedPeriod.subtitle)
+      : L("%@ · iCloud 可多选对比", selectedPeriod.subtitle)
   }
 
   private var maxTokens: Double {
@@ -1628,7 +1628,7 @@ private struct TokenTrendPanel: View {
     VStack(alignment: .leading, spacing: 12) {
       HStack(alignment: .center, spacing: 12) {
         VStack(alignment: .leading, spacing: 2) {
-          Text("Token 趋势")
+          Text("Token 趋势".l10n)
             .font(.system(size: 14, weight: .heavy))
             .foregroundStyle(DashboardColors.text)
           Text(subtitle)
@@ -1793,7 +1793,7 @@ private struct TokenTrendScopeToggleButton: View {
     }
     .buttonStyle(.plain)
     .opacity(isUnavailable ? 0.56 : 1)
-    .help(isUnavailable ? "等待其他设备的 iCloud 同步快照" : "切换 \(title)")
+    .help(isUnavailable ? "等待其他设备的 iCloud 同步快照".l10n : L("切换 %@", title))
   }
 }
 
@@ -1820,7 +1820,7 @@ private struct TokenTrendSeriesSummary: View {
           .foregroundStyle(DashboardColors.subtleText)
       }
 
-      Text("均值 \(BalanceFormatters.compactNumber(series.averageTokens)) · 峰值 \(series.peakBucket?.label ?? "-") \(BalanceFormatters.compactNumber(series.peakBucket?.totalTokens ?? 0))")
+      Text(L("均值 %@ · 峰值 %@ %@", BalanceFormatters.compactNumber(series.averageTokens), series.peakBucket?.label ?? "-", BalanceFormatters.compactNumber(series.peakBucket?.totalTokens ?? 0)))
         .font(.system(size: 9.8, weight: .bold, design: .rounded))
         .foregroundStyle(DashboardColors.subtleText.opacity(0.92))
         .lineLimit(1)
@@ -1848,7 +1848,7 @@ private struct TokenTrendInlineNotice: View {
     HStack(spacing: 6) {
       Image(systemName: "arrow.triangle.2.circlepath")
         .font(.system(size: 10, weight: .black))
-      Text("等待 \(missingTitles) 的 iCloud 快照；另一台 Mac 打开后会自动出现")
+      Text(L("等待 %@ 的 iCloud 快照；另一台 Mac 打开后会自动出现", missingTitles))
         .font(.system(size: 10.5, weight: .bold))
     }
     .foregroundStyle(DashboardColors.subtleText)
@@ -1864,10 +1864,10 @@ private struct TokenTrendUnavailableView: View {
       Image(systemName: "lock.doc")
         .font(.system(size: 28, weight: .bold))
         .foregroundStyle(DashboardColors.subtleText)
-      Text("暂未读到 Codex 个人资料总用量")
+      Text("暂未读到 Codex 个人资料总用量".l10n)
         .font(.system(size: 13.5, weight: .heavy))
         .foregroundStyle(DashboardColors.text)
-      Text("请确认两台 Mac 都已打开算力码表；读到 iCloud 快照后会自动显示真实对比。")
+      Text("请确认两台 Mac 都已打开算力码表；读到 iCloud 快照后会自动显示真实对比。".l10n)
         .font(.system(size: 11.5, weight: .semibold))
         .foregroundStyle(DashboardColors.subtleText)
         .multilineTextAlignment(.center)

@@ -462,9 +462,9 @@ private final class BalanceStripView: NSView {
       let p5 = tool.percent5 ?? .infinity
       let p7 = tool.percent7 ?? .infinity
       if p5 <= p7 {
-        return (tool.percent5, tool.reset5, .hours, tool.color5, "5时")
+        return (tool.percent5, tool.reset5, .hours, tool.color5, "5时".l10n)
       }
-      return (tool.percent7, tool.reset7, .days, tool.color7, "7天")
+      return (tool.percent7, tool.reset7, .days, tool.color7, "7天".l10n)
     }
 
     switch style {
@@ -474,11 +474,11 @@ private final class BalanceStripView: NSView {
       let bottomY = bounds.height * 0.28
       let barWidth: CGFloat = isTight ? 62 : 116
       let widthTop = drawWindowRow(
-        label: "5时", percent: tool.percent5, reset: tool.reset5, mode: .hours, color: tool.color5,
+        label: "5时".l10n, percent: tool.percent5, reset: tool.reset5, mode: .hours, color: tool.color5,
         startX: x, centerY: topY, barWidth: barWidth, showsCountdown: !isTight
       )
       let widthBottom = drawWindowRow(
-        label: "7天", percent: tool.percent7, reset: tool.reset7, mode: .days, color: tool.color7,
+        label: "7天".l10n, percent: tool.percent7, reset: tool.reset7, mode: .days, color: tool.color7,
         startX: x, centerY: bottomY, barWidth: barWidth, showsCountdown: !isTight
       )
       return x + max(widthTop, widthBottom)
@@ -495,8 +495,8 @@ private final class BalanceStripView: NSView {
       // 竖排小标签在左、大号数字 + 数字下方「距刷新」下划线进度条
       var cx = x
       for (percent, color, tag, reset, mode) in [
-        (tool.percent5, tool.color5, "5时", tool.reset5, CountdownMode.hours),
-        (tool.percent7, tool.color7, "7天", tool.reset7, CountdownMode.days)
+        (tool.percent5, tool.color5, "5时".l10n, tool.reset5, CountdownMode.hours),
+        (tool.percent7, tool.color7, "7天".l10n, tool.reset7, CountdownMode.days)
       ] {
         let effective = (percent ?? 100) < 20 ? NSColor.systemRed : color
         if showsWindowTags {

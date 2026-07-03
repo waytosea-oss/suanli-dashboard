@@ -19,6 +19,7 @@ let testingLinkerFlags: [LinkerSetting] = FileManager.default.fileExists(atPath:
 
 let package = Package(
   name: "CodexBalanceDashboard",
+  defaultLocalization: "zh-Hans",
   platforms: [
     .macOS(.v14)
   ],
@@ -26,10 +27,14 @@ let package = Package(
     .executable(name: "CodexBalance", targets: ["CodexBalance"])
   ],
   targets: [
-    .target(name: "CodexBalanceCore"),
+    .target(
+      name: "CodexBalanceCore",
+      resources: [.process("Resources")]
+    ),
     .executableTarget(
       name: "CodexBalance",
-      dependencies: ["CodexBalanceCore"]
+      dependencies: ["CodexBalanceCore"],
+      resources: [.process("Resources")]
     ),
     .executableTarget(
       name: "TestRunner",

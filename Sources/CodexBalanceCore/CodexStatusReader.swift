@@ -471,7 +471,7 @@ public final class CodexStatusReader: @unchecked Sendable {
       }
 
       let limitID = rateLimits["limit_id"] as? String ?? "codex"
-      let limitName = rateLimits["limit_name"] as? String ?? (limitID == "codex" ? "Codex 默认额度" : limitID)
+      let limitName = rateLimits["limit_name"] as? String ?? (limitID == "codex" ? "Codex 默认额度".coreL10n : limitID)
       let event = RateLimitEvent(
         timestamp: timestamp,
         sourceName: file.lastPathComponent,
@@ -553,7 +553,7 @@ public final class CodexStatusReader: @unchecked Sendable {
 
   private static func projectName(fromPath path: String) -> String {
     let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard trimmed.isEmpty == false else { return "未知项目" }
+    guard trimmed.isEmpty == false else { return "未知项目".coreL10n }
     let name = URL(fileURLWithPath: trimmed).lastPathComponent
     return name.isEmpty ? trimmed : name
   }
@@ -1547,7 +1547,7 @@ private final class CodexAppServerRateLimitSource: @unchecked Sendable {
           sourceName: "Codex app-server",
           sourcePath: "account/rateLimits/read",
           limitID: limitID,
-          limitName: snapshot.limitName ?? (limitID == "codex" ? "Codex 默认额度" : limitID),
+          limitName: snapshot.limitName ?? (limitID == "codex" ? "Codex 默认额度".coreL10n : limitID),
           planType: snapshot.planType,
           primary: normalize(snapshot.primary),
           secondary: normalize(snapshot.secondary),
@@ -1609,11 +1609,11 @@ private enum LiveRateLimitError: LocalizedError {
 
   var errorDescription: String? {
     switch self {
-    case .codexExecutableMissing: "找不到 Codex 可执行文件"
-    case .encodingFailed: "无法编码 Codex app-server 请求"
-    case .processExited: "Codex app-server 已退出"
-    case .timeout: "Codex app-server 响应超时"
-    case .emptyResponse: "Codex app-server 返回空结果"
+    case .codexExecutableMissing: "找不到 Codex 可执行文件".coreL10n
+    case .encodingFailed: "无法编码 Codex app-server 请求".coreL10n
+    case .processExited: "Codex app-server 已退出".coreL10n
+    case .timeout: "Codex app-server 响应超时".coreL10n
+    case .emptyResponse: "Codex app-server 返回空结果".coreL10n
     case let .server(message): message
     }
   }

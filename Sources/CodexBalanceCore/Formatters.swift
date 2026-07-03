@@ -6,18 +6,36 @@ public enum BalanceFormatters {
     return "\(Int(value.rounded()))%"
   }
 
+  /// 中日韩用 万/亿 位制，其余语言用 K/M/B
+  private static var usesMyriadUnits: Bool {
+    let language = Locale.preferredLanguages.first ?? ""
+    return language.hasPrefix("zh") || language.hasPrefix("ja") || language.hasPrefix("ko")
+  }
+
   public static func compactNumber(_ value: Int?) -> String {
     guard let value else { return "--" }
-    if value >= 100_000_000 {
-      return compactChineseUnit(Double(value) / 100_000_000, unit: "亿")
-    }
-    if value >= 10_000 {
-      return compactChineseUnit(Double(value) / 10_000, unit: "万")
+    if usesMyriadUnits {
+      if value >= 100_000_000 {
+        return compactUnit(Double(value) / 100_000_000, unit: "亿".coreL10n)
+      }
+      if value >= 10_000 {
+        return compactUnit(Double(value) / 10_000, unit: "万".coreL10n)
+      }
+    } else {
+      if value >= 1_000_000_000 {
+        return compactUnit(Double(value) / 1_000_000_000, unit: "B")
+      }
+      if value >= 1_000_000 {
+        return compactUnit(Double(value) / 1_000_000, unit: "M")
+      }
+      if value >= 10_000 {
+        return compactUnit(Double(value) / 1_000, unit: "K")
+      }
     }
     return NumberFormatter.localizedString(from: NSNumber(value: value), number: .decimal)
   }
 
-  private static func compactChineseUnit(_ value: Double, unit: String) -> String {
+  private static func compactUnit(_ value: Double, unit: String) -> String {
     if value >= 100 || value.rounded(.down) == value {
       return "\(Int(value.rounded()))\(unit)"
     }
@@ -39,22 +57,22 @@ public enum BalanceFormatters {
     switch mode {
     case .hours:
       if hours <= 0 {
-        return "\(max(1, minutes))分钟"
+        return LC("%d分钟", max(1, minutes))
       }
-      return "\(hours)小时\(minutes % 60)分钟"
+      return LC("%d小时%d分钟", hours, minutes % 60)
     case .days:
       if days <= 0 {
-        return "\(hours)小时"
+        return LC("%d小时", hours)
       }
-      return "\(days)天\(hours % 24)小时"
+      return LC("%d天%d小时", days, hours % 24)
     case .auto:
       if days > 0 {
-        return "\(days)天\(hours % 24)小时"
+        return LC("%d天%d小时", days, hours % 24)
       }
       if hours > 0 {
-        return "\(hours)小时\(minutes % 60)分钟"
+        return LC("%d小时%d分钟", hours, minutes % 60)
       }
-      return "\(max(1, minutes))分钟"
+      return LC("%d分钟", max(1, minutes))
     }
   }
 
@@ -68,22 +86,22 @@ public enum BalanceFormatters {
     switch mode {
     case .hours:
       if hours <= 0 {
-        return "\(max(1, minutes))分"
+        return LC("%d分", max(1, minutes))
       }
-      return "\(hours)时\(minutes % 60)分"
+      return LC("%d时%d分", hours, minutes % 60)
     case .days:
       if days <= 0 {
-        return "\(hours)时"
+        return LC("%d时", hours)
       }
-      return "\(days)天\(hours % 24)时"
+      return LC("%d天%d时", days, hours % 24)
     case .auto:
       if days > 0 {
-        return "\(days)天\(hours % 24)时"
+        return LC("%d天%d时", days, hours % 24)
       }
       if hours > 0 {
-        return "\(hours)时\(minutes % 60)分"
+        return LC("%d时%d分", hours, minutes % 60)
       }
-      return "\(max(1, minutes))分"
+      return LC("%d分", max(1, minutes))
     }
   }
 
@@ -95,21 +113,21 @@ public enum BalanceFormatters {
   }
 
   public static func relativeAge(_ date: Date?, now: Date = Date()) -> String {
-    guard let date else { return "无余额事件" }
+    guard let date else { return "无余额事件".coreL10n }
     let seconds = max(0, Int(now.timeIntervalSince(date)))
     if seconds < 60 {
-      return "刚刚"
+      return "刚刚".coreL10n
     }
     let minutes = seconds / 60
     if minutes < 60 {
-      return "\(minutes)分钟前"
+      return LC("%d分钟前", minutes)
     }
     let hours = minutes / 60
     if hours < 24 {
-      return "\(hours)小时\(minutes % 60)分钟前"
+      return LC("%d小时%d分钟前", hours, minutes % 60)
     }
     let days = hours / 24
-    return "\(days)天前"
+    return LC("%d天前", days)
   }
 
   public static func dateTime(_ date: Date?) -> String {

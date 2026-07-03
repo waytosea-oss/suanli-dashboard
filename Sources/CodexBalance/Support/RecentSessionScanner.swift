@@ -70,7 +70,7 @@ final class RecentSessionScanner: @unchecked Sendable {
   private func claudeProjectName(_ url: URL) -> String {
     // 项目目录名形如 "-Users-name-Downloads"，取最后一段
     let dir = url.deletingLastPathComponent().lastPathComponent
-    return dir.split(separator: "-").last.map(String.init) ?? "Claude 会话"
+    return dir.split(separator: "-").last.map(String.init) ?? "Claude 会话".l10n
   }
 
   /// 首条用户消息的截断文本（读文件头部，按 mtime 缓存）
@@ -135,7 +135,7 @@ final class RecentSessionScanner: @unchecked Sendable {
             // Codex 历史会话很多，只看 3 天内的，避免全量扫
             Date().timeIntervalSince(modified) < 3 * 24 * 3600
       else { continue }
-      let title = sessionTitle(for: url, modified: modified) ?? codexProjectName(url) ?? "Codex 会话"
+      let title = sessionTitle(for: url, modified: modified) ?? codexProjectName(url) ?? "Codex 会话".l10n
       chips.append(RecentSessionChip(
         title: title,
         tool: .codex,
