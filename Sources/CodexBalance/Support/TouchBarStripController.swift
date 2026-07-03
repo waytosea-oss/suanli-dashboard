@@ -492,27 +492,34 @@ private final class BalanceStripView: NSView {
       )
       return x + width
     case .badgeQuad:
-      // 无进度条：竖排小标签在左、大号数字顶满高度
+      // 竖排小标签在左、大号数字 + 数字下方「距刷新」下划线进度条
       var cx = x
-      for (percent, color, tag) in [(tool.percent5, tool.color5, "5时"), (tool.percent7, tool.color7, "7天")] {
+      for (percent, color, tag, reset, mode) in [
+        (tool.percent5, tool.color5, "5时", tool.reset5, CountdownMode.hours),
+        (tool.percent7, tool.color7, "7天", tool.reset7, CountdownMode.days)
+      ] {
         let effective = (percent ?? 100) < 20 ? NSColor.systemRed : color
         if showsWindowTags {
           cx += drawVerticalLabel(tag, at: cx, centerY: midY, color: NSColor.white.withAlphaComponent(0.55)) + 3
         }
         let text = percent.map { "\(Int($0.rounded()))\(percentSuffix)" } ?? "--"
-        cx += drawBigNumber(text, at: cx, centerY: midY, color: effective) + 10
+        let numberWidth = drawBigNumber(text, at: cx, centerY: midY + 2, color: effective)
+        drawResetUnderline(x: cx, width: numberWidth, reset: reset, mode: mode, color: effective)
+        cx += numberWidth + 10
       }
       return cx
     case .badge:
-      // 只有一个大数字（更紧张窗口），竖排标签在左
-      let (percent, _, _, color, tag) = tighter()
+      // 只有一个大数字（更紧张窗口），竖排标签在左，下方「距刷新」下划线
+      let (percent, reset, mode, color, tag) = tighter()
       let effective = (percent ?? 100) < 20 ? NSColor.systemRed : color
       var cx = x
       if showsWindowTags {
         cx += drawVerticalLabel(tag, at: cx, centerY: midY, color: NSColor.white.withAlphaComponent(0.55)) + 3
       }
       let text = percent.map { "\(Int($0.rounded()))\(percentSuffix)" } ?? "--"
-      cx += drawBigNumber(text, at: cx, centerY: midY, color: effective)
+      let numberWidth = drawBigNumber(text, at: cx, centerY: midY + 2, color: effective)
+      drawResetUnderline(x: cx, width: numberWidth, reset: reset, mode: mode, color: effective)
+      cx += numberWidth
       return cx
     }
   }
@@ -550,7 +557,16 @@ private final class BalanceStripView: NSView {
     x += barWidth + 6
 
     let percentText = percent.map { "\(Int($0.rounded()))\(showsPercentSign ? "%" : "")" } ?? "--"
-    draw(text: percentText, at: NSPoint(x: x, y: centerY), font: .monospacedDigitSystemFont(ofSize: percentFontSize, weight: .heavy), color: effective)
+    let percentString = NSAttributedString(
+      string: percentText,
+      attributes: [.font: NSFont.monospacedDigitSystemFont(ofSize: percentFontSize, weight: .heavy), .foregroundColor: effective]
+    )
+    let percentY = percentFontSize >= 18 ? centerY + 2 : centerY
+    percentString.draw(at: NSPoint(x: x, y: percentY - percentString.size().height / 2))
+    if percentFontSize >= 18 {
+      // 大数字模式：数字下方画「距刷新」下划线进度条
+      drawResetUnderline(x: x, width: percentString.size().width, reset: reset, mode: mode, color: effective)
+    }
     x += percentAdvance
 
     if showsCountdown {
@@ -577,6 +593,27 @@ private final class BalanceStripView: NSView {
       y -= lineHeight
     }
     return maxWidth
+  }
+
+  /// 数字下方的「距刷新」下划线：淡色轨道 = 完整窗口，深色段 = 还要等的时间。
+  /// 深色段走完（长度归零）即刷新。reset 为空时不画。
+  private func drawResetUnderline(x: CGFloat, width: CGFloat, reset: Date?, mode: CountdownMode, color: NSColor) {
+    guard let reset, width > 10 else { return }
+    let windowSeconds: TimeInterval = mode == .hours ? 5 * 3600 : 7 * 24 * 3600
+    let remaining = reset.timeIntervalSinceNow
+    guard remaining > 0 else { return }
+    let fraction = max(0, min(1, remaining / windowSeconds))
+
+    let barHeight: CGFloat = 3
+    let y: CGFloat = 1.5
+    let track = NSRect(x: x, y: y, width: width, height: barHeight)
+    NSGraphicsContext.current?.saveGraphicsState()
+    NSBezierPath(roundedRect: track, xRadius: barHeight / 2, yRadius: barHeight / 2).addClip()
+    color.withAlphaComponent(0.28).setFill()
+    track.fill()
+    color.setFill()
+    NSRect(x: x, y: y, width: width * fraction, height: barHeight).fill()
+    NSGraphicsContext.current?.restoreGraphicsState()
   }
 
   /// 顶满 Touch Bar 高度的大号数字，返回实际宽度

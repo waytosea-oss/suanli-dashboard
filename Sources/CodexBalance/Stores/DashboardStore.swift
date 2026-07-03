@@ -300,6 +300,7 @@ final class DashboardStore: ObservableObject {
   private let claudeFastReader = ClaudeStatusReader()
   private let claudeFullReader = ClaudeStatusReader()
   private var refreshTimer: Timer?
+  private var claudeFastInFlight = false
   private var quickRetryTask: Task<Void, Never>?
   private var fullRefreshInFlight = false
   private var lastFullRefresh: Date?
@@ -502,7 +503,8 @@ final class DashboardStore: ObservableObject {
   }
 
   private func refreshClaudeFast() {
-    guard claudeToolEnabled else { return }
+    guard claudeToolEnabled, !claudeFastInFlight else { return }
+    claudeFastInFlight = true
     let claudeReader = claudeFastReader
     Task {
       do {
@@ -514,6 +516,7 @@ final class DashboardStore: ObservableObject {
       } catch {
         dashboardLogger.error("Claude fast refresh failed: \(error.localizedDescription, privacy: .public)")
       }
+      claudeFastInFlight = false
     }
   }
 

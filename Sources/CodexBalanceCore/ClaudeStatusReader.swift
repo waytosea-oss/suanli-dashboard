@@ -38,6 +38,7 @@ public final class ClaudeStatusReader: @unchecked Sendable {
   private let rateLimitSource: ClaudeOAuthUsageSource?
   private let usageSyncStore: CodexUsageSyncStore?
   private var fileCache: [String: ParsedClaudeFile] = [:]
+  private let cacheLock = NSLock()
 
   public init(
     claudeHome: URL? = nil,
@@ -62,7 +63,9 @@ public final class ClaudeStatusReader: @unchecked Sendable {
   public func read(now: Date = Date()) throws -> CodexStatus {
     let files = listJSONLFiles()
     let activePaths = Set(files.map(\.path))
+    cacheLock.lock()
     fileCache = fileCache.filter { activePaths.contains($0.key) }
+    cacheLock.unlock()
 
     var seenUUIDs = Set<String>()
     var events: [ClaudeUsageEvent] = []
@@ -102,7 +105,9 @@ public final class ClaudeStatusReader: @unchecked Sendable {
     // 不必等 180 秒一次的全量刷新（避免切换模型等时刻出现「今日数据为 0」的空窗）。
     let files = listJSONLFiles()
     let activePaths = Set(files.map(\.path))
+    cacheLock.lock()
     fileCache = fileCache.filter { activePaths.contains($0.key) }
+    cacheLock.unlock()
     var seenUUIDs = Set<String>()
     var events: [ClaudeUsageEvent] = []
     for file in files.sorted(by: { $0.path < $1.path }) {
@@ -156,7 +161,10 @@ public final class ClaudeStatusReader: @unchecked Sendable {
     let values = try? file.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
     let modified = values?.contentModificationDate ?? .distantPast
     let fileSize = values?.fileSize ?? -1
-    if let cached = fileCache[file.path],
+    cacheLock.lock()
+    let cachedEntry = fileCache[file.path]
+    cacheLock.unlock()
+    if let cached = cachedEntry,
        cached.modified == modified,
        cached.fileSize == fileSize {
       return cached.events
@@ -210,7 +218,9 @@ public final class ClaudeStatusReader: @unchecked Sendable {
       events.append(event)
     }
 
+    cacheLock.lock()
     fileCache[file.path] = ParsedClaudeFile(modified: modified, fileSize: fileSize, events: events)
+    cacheLock.unlock()
     return events
   }
 
