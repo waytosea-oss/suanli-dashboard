@@ -4,6 +4,32 @@
 
 ![macOS](https://img.shields.io/badge/macOS-14%2B%20only-blue) ![Swift](https://img.shields.io/badge/Swift-6-orange) ![License](https://img.shields.io/badge/license-MIT-green) ![i18n](https://img.shields.io/badge/languages-10-purple)
 
+<p align="center">
+  <img src="docs/screenshots/hero-rings.png" width="440" alt="悬浮双环样式 · Floating rings widget">
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/touchbar-live.png" width="940" alt="Touch Bar 常驻余额面板 · Always-on Touch Bar panel">
+  <br><sub>Touch Bar 常驻：双工具余额 + 最近 AI 会话直达 · Always-on balance & recent-session shortcuts</sub>
+</p>
+
+<table align="center">
+  <tr>
+    <td align="center"><img src="docs/screenshots/style-bars.png" width="380" alt="长条样式"><br><sub>长条样式 · Bars</sub></td>
+    <td align="center"><img src="docs/screenshots/style-badge.png" width="400" alt="徽章样式"><br><sub>徽章样式 · Badge</sub></td>
+  </tr>
+</table>
+
+<details>
+<summary>📊 展开面板全景（余额 · 消耗看板 · 多设备趋势）· Full panel</summary>
+<p align="center"><img src="docs/screenshots/panel-full.png" width="520" alt="展开面板全景"></p>
+</details>
+
+<details>
+<summary>📷 Touch Bar 真机实拍 · Touch Bar on real hardware</summary>
+<p align="center"><img src="docs/screenshots/touchbar-photo.jpg" width="720" alt="Touch Bar 实拍"></p>
+</details>
+
 **English**: A macOS-only floating dashboard for monitoring your **OpenAI Codex** and **Claude Code** subscription quotas (5-hour & 7-day rolling windows), token usage and multi-device trends — with an always-on Touch Bar panel and recent-session shortcuts. UI follows your system language (10 languages) with an in-app language picker. **Requires macOS 14+.** Windows/Linux are not supported (the app is built on AppKit/SwiftUI, Keychain, iCloud Drive and Touch Bar APIs) — PRs welcome, see [Platform support](#平台支持--platform-support). Download from [Releases](../../releases), unzip, run `安装并启用自动启动.command`, and see the English notes in [First launch](#三首次启动必读) for Gatekeeper/Keychain steps.
 
 ---

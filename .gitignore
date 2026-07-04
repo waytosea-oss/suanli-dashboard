@@ -3,3 +3,12 @@ dist/
 release/
 *.xcodeproj/xcuserdata/
 .DS_Store
+
+# 截图目录：只允许加工后的展示图入库（原始截图可能含个人内容）
+docs/screenshots/*
+!docs/screenshots/hero-rings.png
+!docs/screenshots/panel-full.png
+!docs/screenshots/style-bars.png
+!docs/screenshots/style-badge.png
+!docs/screenshots/touchbar-live.png
+!docs/screenshots/touchbar-photo.jpg
