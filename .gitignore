@@ -8,6 +8,7 @@ release/
 docs/screenshots/*
 !docs/screenshots/hero-rings.png
 !docs/screenshots/panel-full.png
+!docs/screenshots/settings-full.png
 !docs/screenshots/style-bars.png
 !docs/screenshots/style-badge.png
 !docs/screenshots/touchbar-live.png

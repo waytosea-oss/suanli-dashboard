@@ -20,10 +20,12 @@
   </tr>
 </table>
 
-<details>
-<summary>📊 展开面板全景（余额 · 消耗看板 · 多设备趋势）· Full panel</summary>
-<p align="center"><img src="docs/screenshots/panel-full.png" width="520" alt="展开面板全景"></p>
-</details>
+<table align="center">
+  <tr>
+    <td align="center" valign="top"><img src="docs/screenshots/panel-full.png" width="330" alt="展开面板全景"><br><sub>展开面板：余额 · 看板 · 多设备趋势 · Full panel</sub></td>
+    <td align="center" valign="top"><img src="docs/screenshots/settings-full.png" width="330" alt="设置面板"><br><sub>设置：样式 · 语言 · 主题 · Touch Bar · Settings</sub></td>
+  </tr>
+</table>
 
 <details>
 <summary>📷 Touch Bar 真机实拍 · Touch Bar on real hardware</summary>
