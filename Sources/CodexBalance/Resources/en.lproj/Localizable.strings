@@ -139,3 +139,8 @@
 "跟随系统" = "Follow system";
 "语言 Language" = "Language";
 "切换后自动重启生效" = "Restarts automatically after switching";
+"刷新进度方向" = "Reset progress direction";
+"倒计时" = "Count down";
+"正计时" = "Count up";
+"数字下方细线：倒计时走完刷新，正计时充满刷新" = "Thin line under numbers: count-down empties to reset, count-up fills to reset";
+"数据至 %@" = "Data up to %@";

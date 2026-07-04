@@ -139,3 +139,8 @@
 "跟随系统" = "System folgen";
 "语言 Language" = "Sprache";
 "切换后自动重启生效" = "Startet nach dem Wechsel automatisch neu";
+"刷新进度方向" = "Richtung des Fortschritts";
+"倒计时" = "Countdown";
+"正计时" = "Count-up";
+"数字下方细线：倒计时走完刷新，正计时充满刷新" = "Linie unter den Zahlen: Countdown leert sich, Count-up füllt sich";
+"数据至 %@" = "Daten bis %@";

@@ -139,3 +139,8 @@
 "跟随系统" = "Seguir o sistema";
 "语言 Language" = "Idioma";
 "切换后自动重启生效" = "Reinicia automaticamente ao trocar";
+"刷新进度方向" = "Direção do progresso";
+"倒计时" = "Contagem regressiva";
+"正计时" = "Contagem progressiva";
+"数字下方细线：倒计时走完刷新，正计时充满刷新" = "Linha sob os números: regressiva esvazia, progressiva enche";
+"数据至 %@" = "Dados até %@";

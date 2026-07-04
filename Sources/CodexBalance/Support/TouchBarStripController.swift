@@ -113,6 +113,11 @@ final class TouchBarStripController: NSObject, NSTouchBarDelegate {
     panelView.needsDisplay = true
   }
 
+  func setResetProgressAscending(_ ascending: Bool) {
+    panelView.resetProgressAscending = ascending
+    panelView.needsDisplay = true
+  }
+
   func setDisplayOptions(showsPercentSign: Bool, showsWindowTags: Bool) {
     panelView.showsPercentSign = showsPercentSign
     panelView.showsWindowTags = showsWindowTags
@@ -258,6 +263,8 @@ private final class BalanceStripView: NSView {
   var showsPercentSign = true
   var showsWindowTags = true
   var sessions: [RecentSessionChip] = []
+  /// false=倒计时（深色段=剩余等待），true=正计时（深色段=已走过，充满即刷新）
+  var resetProgressAscending = false
   var onOpenPanel: (() -> Void)?
   private var sessionHitRects: [(rect: NSRect, tool: ToolID)] = []
   /// Touch Bar 实际可用宽度（挂上窗口后实测，之前是猜的会溢出）
@@ -602,7 +609,8 @@ private final class BalanceStripView: NSView {
     let windowSeconds: TimeInterval = mode == .hours ? 5 * 3600 : 7 * 24 * 3600
     let remaining = reset.timeIntervalSinceNow
     guard remaining > 0 else { return }
-    let fraction = max(0, min(1, remaining / windowSeconds))
+    let remainingFraction = max(0, min(1, remaining / windowSeconds))
+    let fraction = resetProgressAscending ? 1 - remainingFraction : remainingFraction
 
     let barHeight: CGFloat = 3
     let y: CGFloat = 1.5

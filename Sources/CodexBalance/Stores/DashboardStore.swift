@@ -286,6 +286,13 @@ final class DashboardStore: ObservableObject {
       )
     }
   }
+  /// 刷新进度条方向：false=倒计时（深色段走完刷新），true=正计时（充满刷新）
+  @Published var resetProgressAscending: Bool {
+    didSet {
+      UserDefaults.standard.set(resetProgressAscending, forKey: "resetProgressAscending")
+      TouchBarStripController.shared.setResetProgressAscending(resetProgressAscending)
+    }
+  }
   @Published var touchBarShowsSessions: Bool {
     didSet {
       UserDefaults.standard.set(touchBarShowsSessions, forKey: "touchBarShowsSessions")
@@ -391,6 +398,7 @@ final class DashboardStore: ObservableObject {
     autoDodgeEnabled = UserDefaults.standard.object(forKey: "autoDodgeEnabled") as? Bool ?? false
     touchBarEnabled = UserDefaults.standard.object(forKey: "touchBarEnabled") as? Bool ?? false
     touchBarKeepAwake = UserDefaults.standard.object(forKey: "touchBarKeepAwake") as? Bool ?? false
+    resetProgressAscending = UserDefaults.standard.object(forKey: "resetProgressAscending") as? Bool ?? false
     let storedTouchBarStyle = UserDefaults.standard.string(forKey: "touchBarStyle")
     touchBarStyle = storedTouchBarStyle.flatMap(TouchBarPanelStyle.init(rawValue:)) ?? .barsQuad
     touchBarShowsPercentSign = UserDefaults.standard.object(forKey: "touchBarShowsPercentSign") as? Bool ?? true

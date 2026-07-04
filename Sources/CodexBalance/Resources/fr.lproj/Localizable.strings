@@ -139,3 +139,8 @@
 "跟随系统" = "Suivre le système";
 "语言 Language" = "Langue";
 "切换后自动重启生效" = "Redémarre automatiquement après le changement";
+"刷新进度方向" = "Sens de la progression";
+"倒计时" = "Compte à rebours";
+"正计时" = "Compte croissant";
+"数字下方细线：倒计时走完刷新，正计时充满刷新" = "Ligne sous les chiffres : à rebours se vide, croissant se remplit";
+"数据至 %@" = "Données jusqu'au %@";

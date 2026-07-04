@@ -830,6 +830,19 @@ struct ExpandedDashboardView: View {
             .controlSize(.small)
           }
 
+          settingsRow(title: "刷新进度方向".l10n, subtitle: "数字下方细线：倒计时走完刷新，正计时充满刷新".l10n) {
+            Picker("", selection: Binding(
+              get: { store.resetProgressAscending },
+              set: { store.resetProgressAscending = $0 }
+            )) {
+              Text("倒计时".l10n).tag(false)
+              Text("正计时".l10n).tag(true)
+            }
+            .labelsHidden()
+            .pickerStyle(.segmented)
+            .frame(width: 148)
+          }
+
           settingsRow(title: "显示 5时/7天 标签".l10n, subtitle: "关闭后只留数值本身".l10n) {
             Toggle("", isOn: Binding(
               get: { store.touchBarShowsWindowTags },
@@ -1540,6 +1553,7 @@ private struct TokenTrendScopeInfo: Identifiable, Hashable {
   var id: String        // deviceID 或 "total"
   var title: String
   var isTotal: Bool
+  var updatedAt: Date?
 }
 
 private struct TokenTrendSeries: Identifiable {
@@ -1580,13 +1594,13 @@ private struct TokenTrendPanel: View {
   /// 动态设备列表（本机排最前，由 SyncStore 保证）+ 可选「总算力」
   private var availableScopes: [TokenTrendScopeInfo] {
     var scopes = stats.deviceUsage.map {
-      TokenTrendScopeInfo(id: $0.deviceID, title: $0.deviceName, isTotal: false)
+      TokenTrendScopeInfo(id: $0.deviceID, title: $0.deviceName, isTotal: false, updatedAt: $0.updatedAt)
     }
     if scopes.isEmpty {
-      scopes = [TokenTrendScopeInfo(id: "local", title: "当前设备".l10n, isTotal: false)]
+      scopes = [TokenTrendScopeInfo(id: "local", title: "当前设备".l10n, isTotal: false, updatedAt: nil)]
     }
     if showsTotalScope {
-      scopes.append(TokenTrendScopeInfo(id: "total", title: "总算力".l10n, isTotal: true))
+      scopes.append(TokenTrendScopeInfo(id: "total", title: "总算力".l10n, isTotal: true, updatedAt: nil))
     }
     return scopes
   }
@@ -1617,13 +1631,7 @@ private struct TokenTrendPanel: View {
     Dictionary(uniqueKeysWithValues: stats.deviceUsage.map { ($0.deviceID, $0) })
   }
 
-  private var templateBuckets: [TokenBucket] {
-    for usage in stats.deviceUsage {
-      let buckets = periodBuckets(of: usage)
-      if !buckets.isEmpty { return buckets }
-    }
-    return localBuckets
-  }
+
 
   private var subtitle: String {
     stats.deviceUsage.count <= 1
@@ -1733,17 +1741,17 @@ private struct TokenTrendPanel: View {
     }
   }
 
+  /// 把设备快照对齐到统一时间轴（本地 stats 的最近14天/6个月 key），
+  /// 缺失日期补零——否则久未同步的设备会带着旧日期挤进图表，总量也会漏加
   private func periodBuckets(of usage: CodexDeviceTokenUsage) -> [TokenBucket] {
-    switch selectedPeriod {
-    case .daily:
-      return Array(usage.daily.suffix(14))
-    case .monthly:
-      return Array(usage.monthly.suffix(6))
-    }
+    let axis = localBuckets
+    let source = selectedPeriod == .daily ? usage.daily : usage.monthly
+    let byKey = Dictionary(usage.daily.isEmpty && usage.monthly.isEmpty ? [] : source.map { ($0.key, $0) }) { a, _ in a }
+    return axis.map { byKey[$0.key] ?? TokenBucket(key: $0.key, label: $0.label) }
   }
 
   private func zeroBuckets() -> [TokenBucket] {
-    templateBuckets.map {
+    localBuckets.map {
       TokenBucket(key: $0.key, label: $0.label)
     }
   }
@@ -1752,7 +1760,7 @@ private struct TokenTrendPanel: View {
     let sources = stats.deviceUsage.map { periodBuckets(of: $0) }.filter { !$0.isEmpty }
     guard !sources.isEmpty else { return zeroBuckets() }
 
-    let template = templateBuckets
+    let template = localBuckets
     let byKey = sources.reduce(into: [String: TokenBucket]()) { result, buckets in
       for bucket in buckets {
         var current = result[bucket.key] ?? TokenBucket(key: bucket.key, label: bucket.label)
@@ -1823,6 +1831,13 @@ private struct TokenTrendSeriesSummary: View {
         Text(series.title)
           .font(.system(size: 10.5, weight: .heavy))
           .foregroundStyle(DashboardColors.subtleText)
+        if let updatedAt = series.info.updatedAt,
+           Date().timeIntervalSince(updatedAt) > 48 * 3600 {
+          Text(L("数据至 %@", BalanceFormatters.dateTime(updatedAt)))
+            .font(.system(size: 9, weight: .bold))
+            .foregroundStyle(Color(red: 1.0, green: 0.62, blue: 0.35))
+            .lineLimit(1)
+        }
       }
 
       HStack(alignment: .firstTextBaseline, spacing: 5) {
