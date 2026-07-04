@@ -25,6 +25,39 @@ enum DashboardToolTab: String, CaseIterable, Identifiable, Hashable {
   }
 }
 
+enum AppLanguage: String, CaseIterable, Identifiable, Hashable {
+  case system
+  case zhHans = "zh-Hans"
+  case zhHant = "zh-Hant"
+  case en
+  case ja
+  case ko
+  case es
+  case fr
+  case de
+  case ru
+  case ptBR = "pt-BR"
+
+  var id: String { rawValue }
+
+  /// 语言名用母语写法，不参与翻译
+  var title: String {
+    switch self {
+    case .system: "跟随系统".l10n
+    case .zhHans: "简体中文"
+    case .zhHant: "繁體中文"
+    case .en: "English"
+    case .ja: "日本語"
+    case .ko: "한국어"
+    case .es: "Español"
+    case .fr: "Français"
+    case .de: "Deutsch"
+    case .ru: "Русский"
+    case .ptBR: "Português (Brasil)"
+    }
+  }
+}
+
 enum CompactStyle: String, CaseIterable, Identifiable, Hashable {
   case rings
   case bars
@@ -142,6 +175,17 @@ final class DashboardStore: ObservableObject {
       handleToolSelectionChange()
     }
   }
+  @Published var appLanguage: AppLanguage {
+    didSet {
+      guard appLanguage != oldValue else { return }
+      if appLanguage == .system {
+        UserDefaults.standard.removeObject(forKey: "AppleLanguages")
+      } else {
+        UserDefaults.standard.set([appLanguage.rawValue], forKey: "AppleLanguages")
+      }
+      relaunchApp()
+    }
+  }
   @Published var compactStyle: CompactStyle {
     didSet {
       UserDefaults.standard.set(compactStyle.rawValue, forKey: "compactStyle")
@@ -164,6 +208,26 @@ final class DashboardStore: ObservableObject {
 
   /// Touch Bar 常驻开启后，折叠态浮窗自动隐身（点 Touch Bar 项唤出展开面板）。
   /// 用 alpha+忽略鼠标而不是 orderOut，保证 SwiftUI 视图继续活着、定时刷新不中断。
+  /// 语言切换需要重启才能重新加载本地化资源；自动完成，无需用户手动
+  private func relaunchApp() {
+    let bundlePath = Bundle.main.bundlePath
+    let command: String
+    if bundlePath.hasSuffix(".app") {
+      command = "sleep 0.6; /usr/bin/open \"\(bundlePath)\""
+    } else {
+      // 开发态直接跑的裸二进制
+      let binary = CommandLine.arguments[0]
+      command = "sleep 0.6; \"\(binary)\" &"
+    }
+    let task = Process()
+    task.executableURL = URL(fileURLWithPath: "/bin/sh")
+    task.arguments = ["-c", command]
+    try? task.run()
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+      NSApp.terminate(nil)
+    }
+  }
+
   private func applyWindowVisibility() {
     guard let window = NSApp.windows.first(where: { $0.title == "算力码表" }) else { return }
     let shouldHide = touchBarEnabled && isCompact && !clamshellActive
@@ -320,6 +384,8 @@ final class DashboardStore: ObservableObject {
       codexToolEnabled = defaults.object(forKey: "toolEnabled.codex") as? Bool ?? true
       claudeToolEnabled = defaults.object(forKey: "toolEnabled.claude") as? Bool ?? true
     }
+    let storedLanguages = UserDefaults.standard.array(forKey: "AppleLanguages") as? [String]
+    appLanguage = storedLanguages?.first.flatMap(AppLanguage.init(rawValue:)) ?? .system
     let storedStyle = UserDefaults.standard.string(forKey: "compactStyle")
     compactStyle = storedStyle.flatMap(CompactStyle.init(rawValue:)) ?? .rings
     autoDodgeEnabled = UserDefaults.standard.object(forKey: "autoDodgeEnabled") as? Bool ?? false

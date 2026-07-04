@@ -136,3 +136,6 @@
 "长条·全" = "Bars · Full";
 "阻止 Touch Bar 息屏；主屏幕也不会自动休眠，用电池时注意续航" = "Prevents Touch Bar dimming; the main display also stays awake — mind battery life";
 "项目消耗 Top 3" = "Top 3 projects";
+"跟随系统" = "Follow system";
+"语言 Language" = "Language";
+"切换后自动重启生效" = "Restarts automatically after switching";

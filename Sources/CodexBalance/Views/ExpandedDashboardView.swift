@@ -552,6 +552,20 @@ struct ExpandedDashboardView: View {
       }
 
       settingsSection(title: "外观".l10n, systemImage: "slider.horizontal.3") {
+        settingsRow(title: "语言 Language".l10n, subtitle: "切换后自动重启生效".l10n) {
+          Picker("", selection: Binding(
+            get: { store.appLanguage },
+            set: { store.appLanguage = $0 }
+          )) {
+            ForEach(AppLanguage.allCases) { language in
+              Text(language.title).tag(language)
+            }
+          }
+          .labelsHidden()
+          .pickerStyle(.menu)
+          .frame(width: 168)
+        }
+
         settingsRow(title: "收起透明度".l10n, subtitle: "调整浮窗底板通透程度".l10n) {
           HStack(spacing: 10) {
             Slider(
