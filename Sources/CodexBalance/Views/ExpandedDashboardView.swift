@@ -790,9 +790,15 @@ struct ExpandedDashboardView: View {
                 Text("Touch Bar 保持常亮".l10n)
                   .font(.system(size: 12.5, weight: .heavy))
                   .foregroundStyle(DashboardColors.text)
-                Text("阻止 Touch Bar 息屏；主屏幕也不会自动休眠，用电池时注意续航".l10n)
-                  .font(.system(size: 11, weight: .semibold))
-                  .foregroundStyle(DashboardColors.subtleText)
+                if store.touchBarKeepAwake && !TouchBarStripController.shared.keepAwakePermissionGranted {
+                  Text("⚠️ 未生效：需在 系统设置→隐私与安全性→辅助功能 中允许「算力码表」".l10n)
+                    .font(.system(size: 11, weight: .heavy))
+                    .foregroundStyle(Color(red: 1.0, green: 0.62, blue: 0.35))
+                } else {
+                  Text("阻止 Touch Bar 息屏；主屏幕也不会自动休眠，用电池时注意续航".l10n)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(DashboardColors.subtleText)
+                }
               }
 
               Spacer(minLength: 8)
@@ -818,7 +824,7 @@ struct ExpandedDashboardView: View {
                   .stroke(Color.white.opacity(0.08), lineWidth: 1)
               )
           )
-          .help("周期性向系统申报用户活跃，保持 Touch Bar 常亮".l10n)
+          .help("尽力保持 Touch Bar 常亮（系统底层控制，不保证生效）".l10n)
 
           settingsRow(title: "显示 % 号", subtitle: "熟悉后可关掉，数字更大更干净".l10n) {
             Toggle("", isOn: Binding(
