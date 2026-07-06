@@ -441,8 +441,38 @@ final class DashboardStore: ObservableObject {
     }
   }
 
+  /// 每次余额刷新落一份实时 JSON（仅百分比与重置时间的数字），
+  /// 供局域网伴侣设备（如小度屏保叠加层）经由本机服务器读取。
+  private func writeLiveBalanceFile() {
+    func toolJSON(_ event: RateLimitEvent?, stats: TokenStats?, enabled: Bool) -> [String: Any]? {
+      guard enabled else { return nil }
+      var object: [String: Any] = [:]
+      if let event {
+        if let p5 = event.primary?.remainingPercent { object["p5"] = p5 }
+        if let p7 = event.secondary?.remainingPercent { object["p7"] = p7 }
+        if let r5 = event.primary?.resetsAt { object["r5"] = r5.timeIntervalSince1970 }
+        if let r7 = event.secondary?.resetsAt { object["r7"] = r7.timeIntervalSince1970 }
+      }
+      if let stats, stats.sampleCount > 0 || stats.todayTokens > 0 {
+        object["today"] = stats.todayTokens
+        object["week"] = stats.last7DaysTokens
+        object["month"] = stats.monthTokens
+      }
+      return object.isEmpty ? nil : object
+    }
+    var root: [String: Any] = ["updatedAt": Date().timeIntervalSince1970]
+    if let codex = toolJSON(status?.main, stats: status?.tokenStats, enabled: codexToolEnabled) { root["codex"] = codex }
+    if let claude = toolJSON(claudeStatus?.main, stats: claudeStatus?.tokenStats, enabled: claudeToolEnabled) { root["claude"] = claude }
+    guard let data = try? JSONSerialization.data(withJSONObject: root) else { return }
+    let dir = FileManager.default.homeDirectoryForCurrentUser
+      .appendingPathComponent("Library/Application Support/CodexBalanceDashboard")
+    try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    try? data.write(to: dir.appendingPathComponent("live-balance.json"), options: [.atomic])
+  }
+
   /// 把两个工具的 5时/7天 完整余额数据推给 Touch Bar（托盘紧凑块 + 全宽面板）
   private func updateTouchBar() {
+    writeLiveBalanceFile()
     guard touchBarEnabled else { return }
     func toolData(_ event: RateLimitEvent?, letter: String, c5: Color, c7: Color) -> TouchBarStripController.ToolData {
       TouchBarStripController.ToolData(

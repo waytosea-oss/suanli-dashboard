@@ -465,8 +465,52 @@ final class ClaudeOAuthUsageSource: @unchecked Sendable {
   }
 
   private func events(from object: [String: Any], now: Date) -> [RateLimitEvent] {
-    let fiveHour = window(from: object["five_hour"] as? [String: Any], windowMinutes: 5 * 60)
-    let sevenDay = window(from: object["seven_day"] as? [String: Any], windowMinutes: 7 * 24 * 60)
+    var fiveHour = window(from: object["five_hour"] as? [String: Any], windowMinutes: 5 * 60)
+    var sevenDay = window(from: object["seven_day"] as? [String: Any], windowMinutes: 7 * 24 * 60)
+    var limitName = "Claude 账号额度".coreL10n
+
+    // 2026-07 起接口提供 limits 数组：session / weekly_all / weekly_scoped（模型专属周限，如 Fable）。
+    // 以它为准：内环取 session；外环取「最紧的周限」——全模型与模型专属谁用量高听谁的，
+    // 否则模型专属限额快打满时码表还显示宽松，会误导。
+    if let limits = object["limits"] as? [[String: Any]] {
+      var session: LimitWindow?
+      var tightestWeekly: LimitWindow?
+      var tightestScope: String?
+      for limit in limits {
+        let percentValue: Double?
+        if let value = limit["percent"] as? Double { percentValue = value }
+        else if let value = limit["percent"] as? Int { percentValue = Double(value) }
+        else { percentValue = nil }
+        guard let percent = percentValue else { continue }
+        let used = max(0, min(100, percent))
+        let resets = (limit["resets_at"] as? String).flatMap { ISO8601DateFormatter.claudeDate(from: $0) }
+        let group = (limit["group"] as? String) ?? (limit["kind"] as? String) ?? ""
+
+        if group == "session" {
+          session = LimitWindow(
+            usedPercent: used, remainingPercent: max(0, 100 - used),
+            windowMinutes: 5 * 60, resetsAt: resets
+          )
+        } else if group == "weekly" {
+          let candidate = LimitWindow(
+            usedPercent: used, remainingPercent: max(0, 100 - used),
+            windowMinutes: 7 * 24 * 60, resetsAt: resets
+          )
+          if tightestWeekly == nil || candidate.usedPercent > tightestWeekly!.usedPercent {
+            tightestWeekly = candidate
+            tightestScope = (((limit["scope"] as? [String: Any])?["model"] as? [String: Any])?["display_name"] as? String)
+          }
+        }
+      }
+      if let session { fiveHour = session }
+      if let tightestWeekly {
+        sevenDay = tightestWeekly
+        if let tightestScope, !tightestScope.isEmpty {
+          limitName = LC("Claude 账号额度（%@ 周限更紧）", tightestScope)
+        }
+      }
+    }
+
     guard fiveHour != nil || sevenDay != nil else { return [] }
 
     return [
@@ -475,7 +519,7 @@ final class ClaudeOAuthUsageSource: @unchecked Sendable {
         sourceName: "Claude usage 接口".coreL10n,
         sourcePath: "api/oauth/usage",
         limitID: "claude",
-        limitName: "Claude 账号额度".coreL10n,
+        limitName: limitName,
         primary: fiveHour,
         secondary: sevenDay
       )

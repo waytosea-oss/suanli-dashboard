@@ -28,3 +28,4 @@
 "未知项目" = "Projet inconnu";
 "研究浏览" = "Recherche";
 "编程" = "Programmation";
+"Claude 账号额度（%@ 周限更紧）" = "Quota Claude (limite hebdo %@ plus serrée)";
