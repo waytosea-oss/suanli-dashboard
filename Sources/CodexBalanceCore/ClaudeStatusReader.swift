@@ -565,10 +565,15 @@ final class ClaudeOAuthUsageSource: @unchecked Sendable {
     }
   }
 
+  /// 本次进程是否已经碰过钥匙串。碰过就不再碰——把「钥匙串授权弹框」限死为每次启动最多 1 次，
+  /// 杜绝续期失败时每 60 秒重试导致的密码风暴。下次启动（或重新登录后）自然会再给一次机会。
+  private static let keychainLock = NSLock()
+  nonisolated(unsafe) private static var keychainConsultedThisLaunch = false
+
   private func readAccessToken() -> String? {
     // 钥匙串是最后手段：每次触碰都可能弹授权框（程序更新后必弹）。
     // 顺序：缓存 token 有效 → 直接用；缓存里有 refreshToken → 直接续期（零钥匙串接触）；
-    // 只有缓存链彻底断掉，才去读钥匙串/凭据文件重建。
+    // 只有缓存链彻底断掉、且本次启动还没碰过钥匙串，才读一次钥匙串重建。
     let cached = readRefreshCache()
     if let cached, cached.isAccessTokenValid {
       return cached.accessToken
@@ -578,13 +583,20 @@ final class ClaudeOAuthUsageSource: @unchecked Sendable {
       writeRefreshCache(renewed)
       return renewed.accessToken
     }
+
+    // 到这里说明缓存续期失败。钥匙串本次启动只碰一次，避免风暴。
+    Self.keychainLock.lock()
+    let alreadyTried = Self.keychainConsultedThisLaunch
+    Self.keychainConsultedThisLaunch = true
+    Self.keychainLock.unlock()
+    guard !alreadyTried else { return nil }
+
     let credentials = readKeychainCredentials() ?? readCredentialsFileCredentials()
     if let credentials, credentials.isAccessTokenValid {
       // 顺手写进自己的缓存：之后续期全走缓存，不再读钥匙串
       writeRefreshCache(credentials)
       return credentials.accessToken
     }
-    // 缓存的 refreshToken 已在上面试过；这里用钥匙串/文件里的（用户重新登录后会更新）
     if let refreshToken = credentials?.refreshToken,
        refreshToken != cached?.refreshToken,
        let renewed = renewAccessToken(refreshToken: refreshToken) {
