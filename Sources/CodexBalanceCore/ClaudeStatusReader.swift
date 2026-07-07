@@ -566,31 +566,30 @@ final class ClaudeOAuthUsageSource: @unchecked Sendable {
   }
 
   private func readAccessToken() -> String? {
-    // 先用自己缓存的续期 token（不碰钥匙串，避免频繁触发钥匙串授权弹框）；
-    // 只有缓存无效时才去读钥匙串/凭据文件。
+    // 钥匙串是最后手段：每次触碰都可能弹授权框（程序更新后必弹）。
+    // 顺序：缓存 token 有效 → 直接用；缓存里有 refreshToken → 直接续期（零钥匙串接触）；
+    // 只有缓存链彻底断掉，才去读钥匙串/凭据文件重建。
     let cached = readRefreshCache()
     if let cached, cached.isAccessTokenValid {
       return cached.accessToken
     }
+    if let refreshToken = cached?.refreshToken,
+       let renewed = renewAccessToken(refreshToken: refreshToken) {
+      writeRefreshCache(renewed)
+      return renewed.accessToken
+    }
     let credentials = readKeychainCredentials() ?? readCredentialsFileCredentials()
     if let credentials, credentials.isAccessTokenValid {
-      // 顺手写进自己的缓存：下次直接用缓存，几小时内不再读钥匙串
+      // 顺手写进自己的缓存：之后续期全走缓存，不再读钥匙串
       writeRefreshCache(credentials)
       return credentials.accessToken
     }
-    // refreshToken 是一次性轮换的：每次续期 Anthropic 会发一个新的 refreshToken。
-    // 缓存里的（上次续期换回的）通常比钥匙串里的更新，故先试缓存、再退回钥匙串，
-    // 兼顾「正常轮换」与「用户重新登录后钥匙串更新」两种情况；任一成功即写回缓存。
-    var refreshCandidates: [String] = []
-    if let token = cached?.refreshToken { refreshCandidates.append(token) }
-    if let token = credentials?.refreshToken, !refreshCandidates.contains(token) {
-      refreshCandidates.append(token)
-    }
-    for refreshToken in refreshCandidates {
-      if let renewed = renewAccessToken(refreshToken: refreshToken) {
-        writeRefreshCache(renewed)
-        return renewed.accessToken
-      }
+    // 缓存的 refreshToken 已在上面试过；这里用钥匙串/文件里的（用户重新登录后会更新）
+    if let refreshToken = credentials?.refreshToken,
+       refreshToken != cached?.refreshToken,
+       let renewed = renewAccessToken(refreshToken: refreshToken) {
+      writeRefreshCache(renewed)
+      return renewed.accessToken
     }
     return nil
   }
