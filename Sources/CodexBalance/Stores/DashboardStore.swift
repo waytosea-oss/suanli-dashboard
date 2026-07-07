@@ -200,7 +200,6 @@ final class DashboardStore: ObservableObject {
     didSet {
       UserDefaults.standard.set(touchBarEnabled, forKey: "touchBarEnabled")
       TouchBarStripController.shared.setEnabled(touchBarEnabled)
-      TouchBarStripController.shared.setKeepAwake(touchBarKeepAwake && touchBarEnabled)
       updateTouchBar()
       applyWindowVisibility()
     }
@@ -305,12 +304,6 @@ final class DashboardStore: ObservableObject {
       pushSessionsToTouchBar()
     }
   }
-  @Published var touchBarKeepAwake: Bool {
-    didSet {
-      UserDefaults.standard.set(touchBarKeepAwake, forKey: "touchBarKeepAwake")
-      TouchBarStripController.shared.setKeepAwake(touchBarKeepAwake && touchBarEnabled)
-    }
-  }
 
   var touchBarSupported: Bool {
     TouchBarStripController.shared.isSupported
@@ -397,7 +390,6 @@ final class DashboardStore: ObservableObject {
     compactStyle = storedStyle.flatMap(CompactStyle.init(rawValue:)) ?? .rings
     autoDodgeEnabled = UserDefaults.standard.object(forKey: "autoDodgeEnabled") as? Bool ?? false
     touchBarEnabled = UserDefaults.standard.object(forKey: "touchBarEnabled") as? Bool ?? false
-    touchBarKeepAwake = UserDefaults.standard.object(forKey: "touchBarKeepAwake") as? Bool ?? false
     resetProgressAscending = UserDefaults.standard.object(forKey: "resetProgressAscending") as? Bool ?? false
     let storedTouchBarStyle = UserDefaults.standard.string(forKey: "touchBarStyle")
     touchBarStyle = storedTouchBarStyle.flatMap(TouchBarPanelStyle.init(rawValue:)) ?? .barsQuad
@@ -421,7 +413,6 @@ final class DashboardStore: ObservableObject {
       self.refresh()
     }
     TouchBarStripController.shared.setEnabled(touchBarEnabled)
-    TouchBarStripController.shared.setKeepAwake(touchBarKeepAwake && touchBarEnabled)
     updateClamshellState(initial: true)
     NotificationCenter.default.addObserver(
       forName: NSApplication.didChangeScreenParametersNotification,

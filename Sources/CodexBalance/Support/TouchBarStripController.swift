@@ -60,58 +60,6 @@ final class TouchBarStripController: NSObject, NSTouchBarDelegate {
     setPresence != nil
   }
 
-  // MARK: - 保持常亮（防 Touch Bar 息屏）
-
-  private var awakeTimer: Timer?
-
-  /// 保持常亮是否具备「辅助功能」权限（合成输入事件没有该权限会被系统静默丢弃）
-  var keepAwakePermissionGranted: Bool {
-    AXIsProcessTrusted()
-  }
-
-  /// 弹出系统的辅助功能授权引导（把本 App 加进 系统设置→隐私与安全性→辅助功能）
-  func requestKeepAwakePermission() {
-    // kAXTrustedCheckOptionPrompt 在 Swift 6 并发检查下不可直接引用，用其字面量键
-    let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
-    _ = AXIsProcessTrustedWithOptions(options)
-  }
-
-  /// 周期性申报用户活跃，重置系统空闲计时，让 Touch Bar 不调暗熄灭。
-  /// 副作用：主屏幕也不会自动休眠（同一空闲计时器），由设置里的独立开关控制。
-  func setKeepAwake(_ enabled: Bool) {
-    awakeTimer?.invalidate()
-    awakeTimer = nil
-    guard enabled else { return }
-    if !keepAwakePermissionGranted {
-      requestKeepAwakePermission()
-    }
-    // 每 20 秒把面板重新铺一次：DFR 层的 present 会强制点亮 Touch Bar，
-    // 不依赖「模拟用户活动」（Touch Bar 有独立调光计时，不吃电源断言/HID 那套）。
-    let timer = Timer(timeInterval: 15, repeats: true) { [weak self] _ in
-      guard let self else { return }
-      Task { @MainActor in
-        guard self.installed else { return }
-        var assertionID: IOPMAssertionID = 0
-        IOPMAssertionDeclareUserActivity(
-          "CodexBalance Touch Bar keep-awake" as CFString,
-          kIOPMUserActiveLocal,
-          &assertionID
-        )
-        self.wakeTouchBar()
-        NSLog("CodexBalance keep-awake tick: dismiss+present flip")
-      }
-    }
-    RunLoop.main.add(timer, forMode: .common)
-    timer.fire()
-    awakeTimer = timer
-  }
-
-  /// 无害地重登记常驻项（不闪烁）。注：Touch Bar 息屏由系统底层控制，
-  /// 应用层无法可靠阻止，此调用尽力而为。
-  private func wakeTouchBar() {
-    setPresence?(Self.trayIdentifier.rawValue as CFString, true)
-  }
-
   func setEnabled(_ enabled: Bool) {
     guard isSupported else { return }
     if enabled {
