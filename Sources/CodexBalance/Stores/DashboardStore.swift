@@ -448,6 +448,20 @@ final class DashboardStore: ObservableObject {
         object["today"] = stats.todayTokens
         object["week"] = stats.last7DaysTokens
         object["month"] = stats.monthTokens
+        object["samples"] = stats.sampleCount
+        // 最近 14 天日趋势：给小度/外部面板画曲线用
+        object["trend"] = stats.daily.suffix(14).map { ["label": $0.label, "tokens": $0.totalTokens] }
+        // 本月用途分布
+        let categories = stats.categoryBreakdown
+          .filter { $0.totalTokens > 0 }
+          .sorted { $0.totalTokens > $1.totalTokens }
+          .prefix(6)
+          .map { ["label": $0.category.label, "tokens": $0.totalTokens] }
+        if !categories.isEmpty { object["categories"] = Array(categories) }
+        // 今日项目 Top 3
+        let projects = stats.todayTopProjects.prefix(3)
+          .map { ["name": $0.projectName, "tokens": $0.totalTokens] }
+        if !projects.isEmpty { object["projects"] = Array(projects) }
       }
       return object.isEmpty ? nil : object
     }
