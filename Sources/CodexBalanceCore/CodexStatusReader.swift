@@ -1568,15 +1568,42 @@ private final class CodexAppServerRateLimitSource: @unchecked Sendable {
   }
 
   private static func codexExecutableURL() -> URL? {
-    let candidates = [
+    let fm = FileManager.default
+    let home = fm.homeDirectoryForCurrentUser.path
+    var candidates = [
+      // Codex 2026 起打包进 ChatGPT.app；旧 Codex.app 仍兼容
+      "/Applications/ChatGPT.app/Contents/Resources/codex",
       "/Applications/Codex.app/Contents/Resources/codex",
+      // npm 全局安装（-g）常见位置
+      "\(home)/.npm-global/bin/codex",
       "/opt/homebrew/bin/codex",
       "/usr/local/bin/codex",
       "/usr/bin/codex"
     ]
-    return candidates
-      .map(URL.init(fileURLWithPath:))
-      .first { FileManager.default.isExecutableFile(atPath: $0.path) }
+    // nvm 各 node 版本下的 bin/codex
+    let nvmVersions = "\(home)/.nvm/versions/node"
+    if let entries = try? fm.contentsOfDirectory(atPath: nvmVersions) {
+      candidates.append(contentsOf: entries.map { "\(nvmVersions)/\($0)/bin/codex" })
+    }
+    if let direct = candidates.map(URL.init(fileURLWithPath:))
+      .first(where: { fm.isExecutableFile(atPath: $0.path) }) {
+      return direct
+    }
+    // 兜底：用 login shell 解析 PATH 里的 codex（覆盖任意自定义安装位置）
+    let which = Process()
+    which.executableURL = URL(fileURLWithPath: "/bin/zsh")
+    which.arguments = ["-lc", "command -v codex"]
+    let pipe = Pipe()
+    which.standardOutput = pipe
+    which.standardError = FileHandle.nullDevice
+    try? which.run()
+    which.waitUntilExit()
+    if let data = try? pipe.fileHandleForReading.readToEnd(),
+       let path = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
+       !path.isEmpty, fm.isExecutableFile(atPath: path) {
+      return URL(fileURLWithPath: path)
+    }
+    return nil
   }
 
   private static func integerID(_ value: Any?) -> Int? {
