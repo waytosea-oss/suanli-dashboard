@@ -95,7 +95,7 @@ cat > "$APP_PATH/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-/usr/bin/codesign --force --deep --sign - "$APP_PATH" >/dev/null
+/usr/bin/codesign --force --deep --sign - "$APP_PATH" >/dev/null || echo "codesign 警告(可忽略：根目录含资源包)"
 
 DESKTOP_LINK="$HOME/Desktop/$APP_NAME.app"
 for OLD_APP_NAME in "${OLD_APP_NAMES[@]}"; do
