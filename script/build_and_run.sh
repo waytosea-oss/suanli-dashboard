@@ -39,10 +39,14 @@ mkdir -p "$APP_PATH/Contents/MacOS" "$APP_PATH/Contents/Resources"
 cp "$BIN_PATH" "$APP_PATH/Contents/MacOS/$EXECUTABLE_NAME"
 chmod +x "$APP_PATH/Contents/MacOS/$EXECUTABLE_NAME"
 
-# SwiftPM 资源包（本地化 .strings 等）：可执行文件在 MacOS/ 下用 Bundle.module 查找，
-# 资源包必须与可执行文件同目录
+# SwiftPM 资源包（本地化 .strings 等）：resource_bundle_accessor 实际查找的是
+# Bundle.main.bundleURL（即 .app 包根目录）+ 构建目录兜底。必须放在 .app 根目录，
+# 否则一旦开发机的 .build 缓存被清掉，App 启动即崩（2026-07-25 事故）。
 for RESOURCE_BUNDLE in "$BUILD_DIR"/CodexBalanceDashboard_*.bundle; do
-  [ -d "$RESOURCE_BUNDLE" ] && cp -R "$RESOURCE_BUNDLE" "$APP_PATH/Contents/MacOS/"
+  if [ -d "$RESOURCE_BUNDLE" ]; then
+    cp -R "$RESOURCE_BUNDLE" "$APP_PATH/"
+    cp -R "$RESOURCE_BUNDLE" "$APP_PATH/Contents/MacOS/"  # 双保险
+  fi
 done
 
 cat > "$APP_PATH/Contents/Info.plist" <<PLIST
