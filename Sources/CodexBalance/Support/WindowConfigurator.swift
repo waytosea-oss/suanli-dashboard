@@ -15,10 +15,11 @@ enum WindowConfigurator {
     let dual = toolCount >= 2
     switch style {
     case .rings:
+      // 主环+卫星版：组 126/96pt 高 + 名称行与内边距
       if mode == .mini {
-        return dual ? miniCompactSize : NSSize(width: 138, height: 148)
+        return dual ? NSSize(width: 212, height: 128) : NSSize(width: 120, height: 128)
       }
-      return dual ? compactSize : NSSize(width: 184, height: 196)
+      return dual ? NSSize(width: 284, height: 164) : NSSize(width: 158, height: 164)
     case .bars:
       if mode == .mini {
         return NSSize(width: 212, height: dual ? 62 : 42)

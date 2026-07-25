@@ -126,6 +126,19 @@ enum DashboardPalette: String, CaseIterable, Identifiable {
   }
 }
 
+extension DashboardPalette {
+  /// 窗口序号取色：色=窗口身份（按固定排序：短周期→长周期→模型专属）。
+  /// Codex 暖族、Claude 冷族；超出部分用备用色循环。
+  func windowColor(cool: Bool, index: Int) -> Color {
+    let warm: [Color] = [fiveHour, weekly, Color(red: 0.94, green: 0.63, blue: 0.51)]   // 粉/琥珀/珊瑚
+    let cold: [Color] = [claudeFiveHour, claudeWeekly,
+                         Color(red: 0.50, green: 0.81, blue: 0.76),                      // 青 #7FCFC3
+                         Color(red: 0.78, green: 0.62, blue: 0.88)]                      // 粉紫
+    let family = cool ? cold : warm
+    return family[index % family.count]
+  }
+}
+
 enum DashboardColors {
   static var selectedPalette: DashboardPalette {
     UserDefaults.standard.string(forKey: DashboardPalette.userDefaultsKey)

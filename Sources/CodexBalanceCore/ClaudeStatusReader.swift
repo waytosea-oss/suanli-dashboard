@@ -472,8 +472,8 @@ final class ClaudeOAuthUsageSource: @unchecked Sendable {
     // 2026-07 起接口提供 limits 数组：session / weekly_all / weekly_scoped（模型专属周限，如 Fable）。
     // 以它为准：内环取 session；外环取「最紧的周限」——全模型与模型专属谁用量高听谁的，
     // 否则模型专属限额快打满时码表还显示宽松，会误导。
+    var labeledWindows: [LabeledWindow] = []
     if let limits = object["limits"] as? [[String: Any]] {
-      var session: LimitWindow?
       var tightestWeekly: LimitWindow?
       var tightestScope: String?
       for limit in limits {
@@ -485,24 +485,34 @@ final class ClaudeOAuthUsageSource: @unchecked Sendable {
         let used = max(0, min(100, percent))
         let resets = (limit["resets_at"] as? String).flatMap { ISO8601DateFormatter.claudeDate(from: $0) }
         let group = (limit["group"] as? String) ?? (limit["kind"] as? String) ?? ""
+        let scopeName = (((limit["scope"] as? [String: Any])?["model"] as? [String: Any])?["display_name"] as? String)
 
         if group == "session" {
-          session = LimitWindow(
+          let window = LimitWindow(
             usedPercent: used, remainingPercent: max(0, 100 - used),
             windowMinutes: 5 * 60, resetsAt: resets
           )
+          fiveHour = window
+          labeledWindows.append(LabeledWindow(label: "5时".coreL10n, window: window, isHourScale: true))
         } else if group == "weekly" {
-          let candidate = LimitWindow(
+          let window = LimitWindow(
             usedPercent: used, remainingPercent: max(0, 100 - used),
             windowMinutes: 7 * 24 * 60, resetsAt: resets
           )
-          if tightestWeekly == nil || candidate.usedPercent > tightestWeekly!.usedPercent {
-            tightestWeekly = candidate
-            tightestScope = (((limit["scope"] as? [String: Any])?["model"] as? [String: Any])?["display_name"] as? String)
+          if let scopeName, !scopeName.isEmpty {
+            // 模型专属周限：0 用量时不占位，有用量才出现
+            if used > 0 {
+              labeledWindows.append(LabeledWindow(label: LC("周·%@", scopeName), window: window, isHourScale: false))
+            }
+          } else {
+            labeledWindows.append(LabeledWindow(label: "周·全部".coreL10n, window: window, isHourScale: false))
+          }
+          if tightestWeekly == nil || window.usedPercent > tightestWeekly!.usedPercent {
+            tightestWeekly = window
+            tightestScope = scopeName
           }
         }
       }
-      if let session { fiveHour = session }
       if let tightestWeekly {
         sevenDay = tightestWeekly
         if let tightestScope, !tightestScope.isEmpty {
@@ -521,7 +531,8 @@ final class ClaudeOAuthUsageSource: @unchecked Sendable {
         limitID: "claude",
         limitName: limitName,
         primary: fiveHour,
-        secondary: sevenDay
+        secondary: sevenDay,
+        windows: labeledWindows
       )
     ]
   }

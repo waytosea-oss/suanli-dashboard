@@ -49,31 +49,21 @@ struct CompactRingsView: View {
 
       HStack(spacing: 0) {
         if store.codexToolEnabled {
-          toolColumn(
-            label: "Codex",
-            tab: .codex,
-            primary: store.primary,
-            secondary: store.secondary,
-            primaryColor: palette.fiveHour,
-            secondaryColor: palette.weekly,
-            unavailable: store.status?.main == nil
+          heroColumn(
+            name: "Codex", tab: .codex, event: store.status?.main,
+            cool: false, unavailable: store.status?.main == nil
           )
         }
         if store.codexToolEnabled && store.claudeToolEnabled {
           Rectangle()
             .fill(Color.white.opacity(0.08))
             .frame(width: 1)
-            .padding(.vertical, isMini ? 18 : 26)
+            .padding(.vertical, isMini ? 16 : 22)
         }
         if store.claudeToolEnabled {
-          toolColumn(
-            label: "Claude",
-            tab: .claude,
-            primary: store.claudePrimary,
-            secondary: store.claudeSecondary,
-            primaryColor: palette.claudeFiveHour,
-            secondaryColor: palette.claudeWeekly,
-            unavailable: !store.claudeBalanceAvailable
+          heroColumn(
+            name: "Claude", tab: .claude, event: store.claudeStatus?.main,
+            cool: true, unavailable: !store.claudeBalanceAvailable
           )
         }
       }
@@ -93,51 +83,29 @@ struct CompactRingsView: View {
     .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
   }
 
-  private func toolColumn(
-    label: String,
+  private func heroColumn(
+    name: String,
     tab: DashboardToolTab,
-    primary: LimitWindow?,
-    secondary: LimitWindow?,
-    primaryColor: Color,
-    secondaryColor: Color,
+    event: RateLimitEvent?,
+    cool: Bool,
     unavailable: Bool
   ) -> some View {
-    VStack(spacing: isMini ? 2 : 4) {
-      ConcentricGaugeView(
-        primary: primary,
-        secondary: secondary,
-        palette: palette,
-        compact: true,
-        mini: isMini,
-        primaryColorOverride: primaryColor,
-        secondaryColorOverride: secondaryColor,
-        toolLabel: label,
-        unavailable: unavailable
-      )
-      .id("\(palette.rawValue)-\(isMini)-\(label)")
-      .frame(width: isMini ? 96 : 126, height: isMini ? 96 : 126)
-
-      HStack(alignment: .bottom) {
-        Text(unavailable ? "--" : resetText(primary?.resetsAt, mode: .hours))
-          .foregroundStyle(unavailable ? DashboardColors.subtleText : primaryColor)
-          .frame(maxWidth: .infinity, alignment: .leading)
-        Text(unavailable ? "--" : resetText(secondary?.resetsAt, mode: .days))
-          .foregroundStyle(unavailable ? DashboardColors.subtleText : secondaryColor)
-          .frame(maxWidth: .infinity, alignment: .trailing)
-      }
-      .font(.system(size: isMini ? 9.5 : 11.5, weight: .heavy, design: .rounded))
-      .monospacedDigit()
-      .lineLimit(1)
-      .minimumScaleFactor(0.7)
-      .padding(.horizontal, isMini ? 6 : 10)
-    }
+    HeroRingGroupView(
+      name: name,
+      event: event,
+      cool: cool,
+      palette: palette,
+      mini: isMini,
+      unavailable: unavailable
+    )
+    .id("\(palette.rawValue)-\(isMini)-\(name)")
     .frame(maxWidth: .infinity)
     .contentShape(Rectangle())
     .onTapGesture {
       store.selectedToolTab = tab
       store.isCompact = false
     }
-    .help(L("展开并查看 %@ 分区", label))
+    .help(L("展开并查看 %@ 分区", name))
   }
 
   private var refreshButton: some View {

@@ -14,24 +14,18 @@ struct CompactBarsView: View {
     ZStack {
       compactBackground(cornerRadius: 10, palette: palette, opacity: backgroundOpacity)
 
-      VStack(spacing: 4) {
+      VStack(spacing: quad ? 8 : 4) {
         if store.codexToolEnabled {
-          toolRows(
-            letter: "C",
-            primary: store.primary,
-            secondary: store.secondary,
-            primaryColor: palette.fiveHour,
-            secondaryColor: palette.weekly,
+          ToolBarBlock(
+            letter: "C", event: store.status?.main, cool: false,
+            palette: palette, quad: quad,
             unavailable: store.status?.main == nil
           )
         }
         if store.claudeToolEnabled {
-          toolRows(
-            letter: "A",
-            primary: store.claudePrimary,
-            secondary: store.claudeSecondary,
-            primaryColor: palette.claudeFiveHour,
-            secondaryColor: palette.claudeWeekly,
+          ToolBarBlock(
+            letter: "A", event: store.claudeStatus?.main, cool: true,
+            palette: palette, quad: quad,
             unavailable: !store.claudeBalanceAvailable
           )
         }
@@ -65,54 +59,10 @@ struct CompactBarsView: View {
     .help("点击展开完整面板".l10n)
   }
 
-  /// 非 quad：一条「更紧张窗口」；quad：5时/7天各一条（第二条不重复字母章）
-  @ViewBuilder
-  private func toolRows(
-    letter: String,
-    primary: LimitWindow?,
-    secondary: LimitWindow?,
-    primaryColor: Color,
-    secondaryColor: Color,
-    unavailable: Bool
-  ) -> some View {
-    if quad {
-      ToolBarRow(
-        letter: letter,
-        window: primary,
-        color: primaryColor,
-        windowTag: "5时".l10n,
-        countdownMode: .hours,
-        unavailable: unavailable
-      )
-      ToolBarRow(
-        letter: "",
-        window: secondary,
-        color: secondaryColor,
-        windowTag: "7天".l10n,
-        countdownMode: .days,
-        unavailable: unavailable
-      )
-    } else {
-      let tighterIsPrimary = isTighterPrimary(primary, secondary)
-      ToolBarRow(
-        letter: letter,
-        window: tighterIsPrimary ? primary : secondary,
-        color: tighterIsPrimary ? primaryColor : secondaryColor,
-        windowTag: tighterIsPrimary ? "5时".l10n : "7天".l10n,
-        countdownMode: tighterIsPrimary ? .hours : .days,
-        unavailable: unavailable
-      )
-    }
-  }
 }
 
-private func isTighterPrimary(_ primary: LimitWindow?, _ secondary: LimitWindow?) -> Bool {
-  guard let primary, let secondary else { return primary != nil }
-  return primary.remainingPercent <= secondary.remainingPercent
-}
-
-/// 折叠态「徽章」样式：一个小胶囊，[C 色块][百分比] | [A 色块][百分比]，
-/// 每个工具显示更紧张窗口的整数百分比；悬浮提示完整信息，点击展开。
+/// 折叠态「徽章」样式：等宽单元内 [字母章][瓶颈大数字][卫星点列]；
+/// quad 版在数字右侧竖排其余窗口的小数字（最多 2 个）。窗口数任意。
 struct CompactBadgeView: View {
   var quad = false
   @EnvironmentObject private var store: DashboardStore
@@ -125,24 +75,11 @@ struct CompactBadgeView: View {
 
       HStack(spacing: 5) {
         if store.codexToolEnabled {
-          if quad {
-            quadBadgeUnit(
-              letter: "C",
-              primary: store.primary, secondary: store.secondary,
-              primaryColor: palette.fiveHour, secondaryColor: palette.weekly,
-              unavailable: store.status?.main == nil
-            )
-          } else {
-            badgeUnit(
-              letter: "C",
-              window: tighterWindow(store.primary, store.secondary),
-              color: tighterColor(
-                store.primary, store.secondary,
-                primaryColor: palette.fiveHour, secondaryColor: palette.weekly
-              ),
-              unavailable: store.status?.main == nil
-            )
-          }
+          BadgeUnit(
+            letter: "C", event: store.status?.main, cool: false,
+            palette: palette, quad: quad,
+            unavailable: store.status?.main == nil
+          )
         }
         if store.codexToolEnabled && store.claudeToolEnabled {
           Rectangle()
@@ -150,24 +87,11 @@ struct CompactBadgeView: View {
             .frame(width: 1, height: 12)
         }
         if store.claudeToolEnabled {
-          if quad {
-            quadBadgeUnit(
-              letter: "A",
-              primary: store.claudePrimary, secondary: store.claudeSecondary,
-              primaryColor: palette.claudeFiveHour, secondaryColor: palette.claudeWeekly,
-              unavailable: !store.claudeBalanceAvailable
-            )
-          } else {
-            badgeUnit(
-              letter: "A",
-              window: tighterWindow(store.claudePrimary, store.claudeSecondary),
-              color: tighterColor(
-                store.claudePrimary, store.claudeSecondary,
-                primaryColor: palette.claudeFiveHour, secondaryColor: palette.claudeWeekly
-              ),
-              unavailable: !store.claudeBalanceAvailable
-            )
-          }
+          BadgeUnit(
+            letter: "A", event: store.claudeStatus?.main, cool: true,
+            palette: palette, quad: quad,
+            unavailable: !store.claudeBalanceAvailable
+          )
         }
       }
       .padding(.horizontal, 8)
@@ -178,147 +102,185 @@ struct CompactBadgeView: View {
     .help(badgeHelpText)
   }
 
-  /// 四数字单元：字母章 + [5时数字/7天数字]（各用自己的窗口色）
-  private func quadBadgeUnit(
-    letter: String,
-    primary: LimitWindow?,
-    secondary: LimitWindow?,
-    primaryColor: Color,
-    secondaryColor: Color,
-    unavailable: Bool
-  ) -> some View {
-    HStack(spacing: 3) {
-      RoundedRectangle(cornerRadius: 3, style: .continuous)
-        .fill(unavailable ? Color.white.opacity(0.16) : primaryColor)
-        .frame(width: 11, height: 11)
-        .overlay(
-          Text(letter)
-            .font(.system(size: 7.5, weight: .heavy, design: .rounded))
-            .foregroundStyle(unavailable ? DashboardColors.subtleText : Color.black.opacity(0.75))
-        )
-      Text(unavailable ? "--" : "\(Int((primary?.remainingPercent ?? 0).rounded()))")
-        .font(.system(size: 11.5, weight: .heavy, design: .rounded))
-        .monospacedDigit()
-        .foregroundStyle(unavailable ? DashboardColors.subtleText : primaryColor)
-        .frame(minWidth: 19, alignment: .trailing)
-      Text("/")
-        .font(.system(size: 9, weight: .bold))
-        .foregroundStyle(DashboardColors.subtleText)
-      Text(unavailable ? "--" : "\(Int((secondary?.remainingPercent ?? 0).rounded()))")
-        .font(.system(size: 11.5, weight: .heavy, design: .rounded))
-        .monospacedDigit()
-        .foregroundStyle(unavailable ? DashboardColors.subtleText : secondaryColor)
-        .frame(minWidth: 19, alignment: .trailing)
-    }
-  }
-
-  private func badgeUnit(letter: String, window: LimitWindow?, color: Color, unavailable: Bool) -> some View {
-    HStack(spacing: 3) {
-      RoundedRectangle(cornerRadius: 3, style: .continuous)
-        .fill(unavailable ? Color.white.opacity(0.16) : color)
-        .frame(width: 11, height: 11)
-        .overlay(
-          Text(letter)
-            .font(.system(size: 7.5, weight: .heavy, design: .rounded))
-            .foregroundStyle(unavailable ? DashboardColors.subtleText : Color.black.opacity(0.75))
-        )
-      Text(unavailable ? "--" : "\(Int((window?.remainingPercent ?? 0).rounded()))")
-        .font(.system(size: 11.5, weight: .heavy, design: .rounded))
-        .monospacedDigit()
-        .foregroundStyle(unavailable ? DashboardColors.subtleText : Color(red: 0.93, green: 0.93, blue: 0.93))
-        .frame(minWidth: 19, alignment: .trailing)
-    }
-  }
-
   private var badgeHelpText: String {
-    func describe(_ name: String, _ primary: LimitWindow?, _ secondary: LimitWindow?, unavailable: Bool) -> String {
-      guard !unavailable else { return L("%@: 暂无数据", name) }
-      let p = primary.map { L("5时 %d%%", Int($0.remainingPercent.rounded())) } ?? L("5时 %@", "--")
-      let s = secondary.map { L("7天 %d%%", Int($0.remainingPercent.rounded())) } ?? L("7天 %@", "--")
-      return "\(name): \(p) · \(s)"
+    func describe(_ name: String, _ event: RateLimitEvent?, unavailable: Bool) -> String {
+      guard !unavailable, let event else { return L("%@: 暂无数据", name) }
+      let parts = event.resolvedWindows.map {
+        "\($0.label) \(BalanceFormatters.percent($0.window.remainingPercent))"
+      }
+      return "\(name): \(parts.joined(separator: " · "))"
     }
-    return describe("Codex", store.primary, store.secondary, unavailable: store.status?.main == nil)
-      + "\n" + describe("Claude", store.claudePrimary, store.claudeSecondary, unavailable: !store.claudeBalanceAvailable)
-      + "\n点击展开完整面板"
+    return describe("Codex", store.status?.main, unavailable: store.status?.main == nil)
+      + "\n" + describe("Claude", store.claudeStatus?.main, unavailable: !store.claudeBalanceAvailable)
+      + "\n" + "点击展开完整面板".l10n
   }
 }
 
-/// 单行工具进度条：色块字母 + 进度条 + 百分比 + 窗口标签/倒计时小字（窗口由调用方指定）。
-private struct ToolBarRow: View {
+/// 徽章单元：字母章 + 瓶颈大数字 + 卫星指示（点列 / quad 小数字列）
+private struct BadgeUnit: View {
   var letter: String
-  var window: LimitWindow?
-  var color: Color
-  var windowTag: String
-  var countdownMode: CountdownMode
+  var event: RateLimitEvent?
+  var cool: Bool
+  var palette: DashboardPalette
+  var quad: Bool
   var unavailable: Bool
 
+  private var windows: [LabeledWindow] { event?.resolvedWindows ?? [] }
+  private var bottleneck: LabeledWindow? { event?.bottleneckWindow }
+  private var bottleneckIndex: Int {
+    guard let bottleneck else { return 0 }
+    return windows.firstIndex { $0.label == bottleneck.label } ?? 0
+  }
+
+  private func color(_ index: Int) -> Color {
+    unavailable ? Color.white.opacity(0.25) : palette.windowColor(cool: cool, index: index)
+  }
+
+  /// 除瓶颈外的其余窗口（按紧张度排序）
+  private var others: [(index: Int, labeled: LabeledWindow)] {
+    windows.enumerated()
+      .filter { $0.offset != bottleneckIndex }
+      .sorted { $0.element.window.remainingPercent < $1.element.window.remainingPercent }
+      .map { (index: $0.offset, labeled: $0.element) }
+  }
+
   var body: some View {
-    HStack(spacing: 5) {
-      Group {
-        if letter.isEmpty {
-          Color.clear
-        } else {
-          RoundedRectangle(cornerRadius: 3.5, style: .continuous)
-            .fill(unavailable ? Color.white.opacity(0.16) : color)
-            .overlay(
-              Text(letter)
-                .font(.system(size: 8, weight: .heavy, design: .rounded))
-                .foregroundStyle(unavailable ? DashboardColors.subtleText : Color.black.opacity(0.75))
-            )
+    HStack(spacing: 3) {
+      RoundedRectangle(cornerRadius: 3, style: .continuous)
+        .fill(unavailable ? Color.white.opacity(0.16) : color(bottleneckIndex))
+        .frame(width: 11, height: 11)
+        .overlay(
+          Text(letter)
+            .font(.system(size: 7.5, weight: .heavy, design: .rounded))
+            .foregroundStyle(unavailable ? DashboardColors.subtleText : Color.black.opacity(0.75))
+        )
+
+      Text(unavailable ? "--" : "\(Int((bottleneck?.window.remainingPercent ?? 0).rounded()))")
+        .font(.system(size: quad ? 12.5 : 11.5, weight: .heavy, design: .rounded))
+        .monospacedDigit()
+        .foregroundStyle(unavailable ? DashboardColors.subtleText : color(bottleneckIndex))
+        .frame(minWidth: 19, alignment: .trailing)
+
+      if quad {
+        // quad：其余窗口小数字竖排（最多 2，超出折叠为灰点）
+        if !others.isEmpty {
+          VStack(alignment: .leading, spacing: 0) {
+            ForEach(others.prefix(2), id: \.index) { item in
+              Text(unavailable ? "--" : "\(Int(item.labeled.window.remainingPercent.rounded()))")
+                .font(.system(size: 8, weight: .bold, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(color(item.index))
+            }
+            if others.count > 2 {
+              Circle().fill(Color.white.opacity(0.4)).frame(width: 2, height: 2)
+            }
+          }
+        }
+      } else if windows.count > 1 {
+        // 非 quad：卫星点列（越耗越实）
+        VStack(spacing: 2) {
+          ForEach(Array(windows.enumerated()), id: \.offset) { index, labeled in
+            Circle()
+              .fill(color(index).opacity(0.30 + 0.70 * (1 - min(1, max(0, labeled.window.remainingPercent / 100)))))
+              .frame(width: 2.5, height: 2.5)
+              .overlay(Circle().stroke(index == bottleneckIndex ? Color.white.opacity(0.5) : .clear, lineWidth: 0.5))
+          }
         }
       }
-      .frame(width: 13, height: 13)
-
-      GeometryReader { proxy in
-        ZStack(alignment: .leading) {
-          Capsule(style: .continuous)
-            .fill((unavailable ? Color.white : color).opacity(0.15))
-          Capsule(style: .continuous)
-            .fill(unavailable ? Color.clear : color)
-            .frame(
-              width: max(
-                6,
-                proxy.size.width * CGFloat(min(1, max(0, (window?.remainingPercent ?? 0) / 100)))
-              )
-            )
-        }
-      }
-      .frame(height: 7)
-
-      VStack(alignment: .trailing, spacing: 0) {
-        Text(unavailable ? "--" : "\(Int((window?.remainingPercent ?? 0).rounded()))%")
-          .font(.system(size: 11, weight: .heavy, design: .rounded))
-          .monospacedDigit()
-          .foregroundStyle(unavailable ? DashboardColors.subtleText : color)
-        Text(unavailable ? "暂无".l10n : "\(windowTag) \(BalanceFormatters.resetCountdownShort(window?.resetsAt, mode: countdownMode))")
-          .font(.system(size: 7.5, weight: .bold, design: .rounded))
-          .monospacedDigit()
-          .foregroundStyle(DashboardColors.subtleText)
-      }
-      .frame(width: 62, alignment: .trailing)
-      .lineLimit(1)
-      .minimumScaleFactor(0.7)
     }
-    .frame(height: 19)
-    .help(unavailable ? "暂无数据".l10n : L("%@ 剩余 %d%% · 重置 %@", windowTag.l10n, Int((window?.remainingPercent ?? 0).rounded()), BalanceFormatters.resetCountdownShort(window?.resetsAt, mode: countdownMode)))
   }
 }
 
-private func tighterWindow(_ primary: LimitWindow?, _ secondary: LimitWindow?) -> LimitWindow? {
-  guard let primary else { return secondary }
-  guard let secondary else { return primary }
-  return primary.remainingPercent <= secondary.remainingPercent ? primary : secondary
-}
+/// 长条块：主条行（瓶颈窗口）+（quad 时）卫星微条行。窗口数任意，版式不变。
+private struct ToolBarBlock: View {
+  var letter: String
+  var event: RateLimitEvent?
+  var cool: Bool
+  var palette: DashboardPalette
+  var quad: Bool
+  var unavailable: Bool
 
-private func tighterColor(
-  _ primary: LimitWindow?,
-  _ secondary: LimitWindow?,
-  primaryColor: Color,
-  secondaryColor: Color
-) -> Color {
-  guard let primary else { return secondaryColor }
-  guard let secondary else { return primaryColor }
-  return primary.remainingPercent <= secondary.remainingPercent ? primaryColor : secondaryColor
+  private var windows: [LabeledWindow] { event?.resolvedWindows ?? [] }
+  private var bottleneck: LabeledWindow? { event?.bottleneckWindow }
+  private var bottleneckIndex: Int {
+    guard let bottleneck else { return 0 }
+    return windows.firstIndex { $0.label == bottleneck.label } ?? 0
+  }
+
+  private func color(_ index: Int) -> Color {
+    unavailable ? Color.white.opacity(0.25) : palette.windowColor(cool: cool, index: index)
+  }
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 3) {
+      // 主条行
+      HStack(spacing: 5) {
+        RoundedRectangle(cornerRadius: 3.5, style: .continuous)
+          .fill(unavailable ? Color.white.opacity(0.16) : color(bottleneckIndex))
+          .overlay(
+            Text(letter)
+              .font(.system(size: 8, weight: .heavy, design: .rounded))
+              .foregroundStyle(unavailable ? DashboardColors.subtleText : Color.black.opacity(0.75))
+          )
+          .frame(width: 13, height: 13)
+
+        GeometryReader { proxy in
+          ZStack(alignment: .leading) {
+            Capsule(style: .continuous)
+              .fill((unavailable ? Color.white : color(bottleneckIndex)).opacity(0.15))
+            Capsule(style: .continuous)
+              .fill(unavailable ? Color.clear : color(bottleneckIndex))
+              .frame(width: max(6, proxy.size.width * CGFloat(min(1, max(0, (bottleneck?.window.remainingPercent ?? 0) / 100)))))
+          }
+        }
+        .frame(height: 7)
+
+        VStack(alignment: .trailing, spacing: 0) {
+          Text(unavailable ? "--" : BalanceFormatters.percent(bottleneck?.window.remainingPercent))
+            .font(.system(size: 11, weight: .heavy, design: .rounded))
+            .monospacedDigit()
+            .foregroundStyle(unavailable ? DashboardColors.subtleText : color(bottleneckIndex))
+          Text(unavailable ? "暂无".l10n : "\(bottleneck?.label ?? "--") \(BalanceFormatters.resetCountdownShort(bottleneck?.window.resetsAt, mode: (bottleneck?.isHourScale ?? false) ? .hours : .days))")
+            .font(.system(size: 7.5, weight: .bold, design: .rounded))
+            .monospacedDigit()
+            .foregroundStyle(DashboardColors.subtleText)
+        }
+        .frame(width: 66, alignment: .trailing)
+        .lineLimit(1)
+        .minimumScaleFactor(0.7)
+      }
+      .frame(height: 19)
+
+      // 卫星微条行（仅 quad；缩进对齐主条左缘）
+      if quad, windows.count > 0 {
+        HStack(spacing: 8) {
+          ForEach(Array(windows.enumerated()), id: \.offset) { index, labeled in
+            HStack(spacing: 3) {
+              Circle()
+                .fill(color(index))
+                .frame(width: 5, height: 5)
+                .overlay(Circle().stroke(index == bottleneckIndex ? Color.white.opacity(0.5) : .clear, lineWidth: 0.5))
+              ZStack(alignment: .leading) {
+                Capsule().fill(Color.white.opacity(0.12))
+                Capsule().fill(color(index))
+                  .frame(width: max(2, 28 * CGFloat(min(1, max(0, labeled.window.remainingPercent / 100)))))
+              }
+              .frame(width: 28, height: 3)
+              Text(unavailable ? "--" : "\(Int(labeled.window.remainingPercent.rounded()))")
+                .font(.system(size: 7, weight: .bold, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(Color.white.opacity(0.75))
+            }
+            .help("\(labeled.label) · \(BalanceFormatters.percent(labeled.window.remainingPercent)) · \(BalanceFormatters.resetCountdownShort(labeled.window.resetsAt, mode: labeled.isHourScale ? .hours : .days))")
+          }
+          Spacer(minLength: 0)
+        }
+        .padding(.leading, 18)
+        .frame(height: 10)
+      }
+    }
+    .help(unavailable ? "暂无数据".l10n : "")
+  }
 }
 
 private func hoverButton(systemImage: String, help: String, action: @escaping () -> Void) -> some View {

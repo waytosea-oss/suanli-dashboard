@@ -143,77 +143,12 @@ struct ExpandedDashboardView: View {
   }
 
   private var claudeGaugePanel: some View {
-    ZStack {
-      RoundedRectangle(cornerRadius: 12, style: .continuous)
-        .fill(
-          LinearGradient(
-            colors: [
-              Color.black.opacity(0.16),
-              palette.panelRaised.opacity(0.70)
-            ],
-            startPoint: .top,
-            endPoint: .bottom
-          )
-        )
-        .overlay(
-          RoundedRectangle(cornerRadius: 12, style: .continuous)
-            .stroke(Color.white.opacity(0.10), lineWidth: 1)
-        )
-
-      ConcentricGaugeView(
-        primary: store.claudePrimary,
-        secondary: store.claudeSecondary,
-        palette: palette,
-        primaryColorOverride: palette.claudeFiveHour,
-        secondaryColorOverride: palette.claudeWeekly,
-        unavailable: !store.claudeBalanceAvailable
-      )
-      .id("claude-\(palette.rawValue)")
-      .frame(width: 292, height: 292)
-      .padding(.top, 2)
-
-      VStack {
-        HStack {
-          Spacer()
-          Text(claudeFreshnessText)
-            .font(.system(size: 11, weight: .heavy))
-            .foregroundStyle(DashboardColors.subtleText)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(
-              Capsule(style: .continuous)
-                .fill(Color.white.opacity(0.055))
-                .overlay(Capsule(style: .continuous).stroke(Color.white.opacity(0.08), lineWidth: 1))
-            )
-        }
-        Spacer()
-      }
-      .padding(14)
-
-      VStack {
-        Spacer()
-        HStack(alignment: .bottom) {
-          resetCorner(
-            value: store.claudeBalanceAvailable
-              ? BalanceFormatters.resetCountdown(store.claudePrimary?.resetsAt, mode: .hours)
-              : "--",
-            tint: palette.claudeFiveHour,
-            alignment: .leading
-          )
-          Spacer()
-          resetCorner(
-            value: store.claudeBalanceAvailable
-              ? BalanceFormatters.resetCountdown(store.claudeSecondary?.resetsAt, mode: .days)
-              : "--",
-            tint: palette.claudeWeekly,
-            alignment: .trailing
-          )
-        }
-        .padding(.horizontal, 24)
-        .padding(.bottom, 16)
-      }
-    }
-    .frame(height: 320)
+    heroGaugePanel(
+      event: store.claudeStatus?.main,
+      cool: true,
+      unavailable: !store.claudeBalanceAvailable,
+      freshness: claudeFreshnessText
+    )
   }
 
   private var claudeFreshnessText: String {
@@ -224,29 +159,10 @@ struct ExpandedDashboardView: View {
   }
 
   private var claudeOverviewCards: some View {
-    HStack(spacing: 12) {
-      MiniMetricCard(
-        title: "5 小时余额".l10n,
-        value: store.claudeBalanceAvailable ? BalanceFormatters.percent(store.claudePrimary?.remainingPercent) : "--",
-        tint: palette.claudeFiveHour,
-        footnote: store.claudeBalanceAvailable ? L("已用 %@", BalanceFormatters.percent(store.claudePrimary?.usedPercent)) : "暂无数据".l10n,
-        surface: palette.panelRaised
-      )
-      MiniMetricCard(
-        title: "7 天余额".l10n,
-        value: store.claudeBalanceAvailable ? BalanceFormatters.percent(store.claudeSecondary?.remainingPercent) : "--",
-        tint: palette.claudeWeekly,
-        footnote: store.claudeBalanceAvailable ? L("已用 %@", BalanceFormatters.percent(store.claudeSecondary?.usedPercent)) : "暂无数据".l10n,
-        surface: palette.panelRaised
-      )
-      MiniMetricCard(
-        title: "今日 Token".l10n,
-        value: BalanceFormatters.compactNumber(store.claudeTokenStats.todayTokens),
-        tint: DashboardColors.text,
-        footnote: L("本月 %@", BalanceFormatters.compactNumber(store.claudeTokenStats.monthTokens)),
-        surface: palette.panelRaised
-      )
-    }
+    windowOverviewCards(
+      event: store.claudeStatus?.main, cool: true,
+      todayTokens: store.claudeTokenStats.todayTokens, monthTokens: store.claudeTokenStats.monthTokens
+    )
   }
 
   private var claudeRecentEvents: some View {
@@ -265,10 +181,11 @@ struct ExpandedDashboardView: View {
               Text(BalanceFormatters.dateTime(event.timestamp))
                 .foregroundStyle(DashboardColors.subtleText)
               Spacer()
-              Text(BalanceFormatters.percent(event.primary?.remainingPercent))
-                .foregroundStyle(palette.claudeFiveHour)
-              Text(BalanceFormatters.percent(event.secondary?.remainingPercent))
-                .foregroundStyle(palette.claudeWeekly)
+              ForEach(Array(event.resolvedWindows.enumerated()), id: \.offset) { index, labeled in
+                Text(BalanceFormatters.percent(labeled.window.remainingPercent))
+                  .foregroundStyle(palette.windowColor(cool: true, index: index))
+                  .help(labeled.label)
+              }
             }
             .font(.system(size: 12, weight: .semibold))
             .monospacedDigit()
@@ -297,26 +214,11 @@ struct ExpandedDashboardView: View {
         )
 
       HStack(spacing: 14) {
-        VStack(spacing: 6) {
-          ConcentricGaugeView(
-            primary: store.primary,
-            secondary: store.secondary,
-            palette: palette,
-            compact: true,
-            toolLabel: "Codex",
-            unavailable: store.status?.main == nil
-          )
-          .id("all-codex-\(palette.rawValue)")
-          .frame(width: 150, height: 150)
-          HStack {
-            Text(BalanceFormatters.resetCountdownShort(store.primary?.resetsAt, mode: .hours))
-              .foregroundStyle(palette.fiveHour)
-            Text(BalanceFormatters.resetCountdownShort(store.secondary?.resetsAt, mode: .days))
-              .foregroundStyle(palette.weekly)
-          }
-          .font(.system(size: 12, weight: .heavy, design: .rounded))
-          .monospacedDigit()
-        }
+        HeroRingGroupView(
+          name: "Codex", event: store.status?.main, cool: false,
+          palette: palette, unavailable: store.status?.main == nil
+        )
+        .id("all-codex-\(palette.rawValue)")
         .frame(maxWidth: .infinity)
 
         Rectangle()
@@ -324,34 +226,17 @@ struct ExpandedDashboardView: View {
           .frame(width: 1)
           .padding(.vertical, 26)
 
-        VStack(spacing: 6) {
-          ConcentricGaugeView(
-            primary: store.claudePrimary,
-            secondary: store.claudeSecondary,
-            palette: palette,
-            compact: true,
-            primaryColorOverride: palette.claudeFiveHour,
-            secondaryColorOverride: palette.claudeWeekly,
-            toolLabel: "Claude",
-            unavailable: !store.claudeBalanceAvailable
-          )
-          .id("all-claude-\(palette.rawValue)")
-          .frame(width: 150, height: 150)
-          HStack {
-            Text(store.claudeBalanceAvailable ? BalanceFormatters.resetCountdownShort(store.claudePrimary?.resetsAt, mode: .hours) : "--")
-              .foregroundStyle(palette.claudeFiveHour)
-            Text(store.claudeBalanceAvailable ? BalanceFormatters.resetCountdownShort(store.claudeSecondary?.resetsAt, mode: .days) : "--")
-              .foregroundStyle(palette.claudeWeekly)
-          }
-          .font(.system(size: 12, weight: .heavy, design: .rounded))
-          .monospacedDigit()
-        }
+        HeroRingGroupView(
+          name: "Claude", event: store.claudeStatus?.main, cool: true,
+          palette: palette, unavailable: !store.claudeBalanceAvailable
+        )
+        .id("all-claude-\(palette.rawValue)")
         .frame(maxWidth: .infinity)
       }
       .padding(.vertical, 12)
       .padding(.horizontal, 12)
     }
-    .frame(height: 230)
+    .frame(height: 190)
   }
 
   private var allSummaryBoard: some View {
@@ -388,15 +273,18 @@ struct ExpandedDashboardView: View {
     )
   }
 
-  private var gaugePanel: some View {
+  /// 展开态主环面板：左主环（瓶颈窗口）+ 右「窗口速览」竖列，任意窗口数同构
+  private func heroGaugePanel(
+    event: RateLimitEvent?,
+    cool: Bool,
+    unavailable: Bool,
+    freshness: String?
+  ) -> some View {
     ZStack {
       RoundedRectangle(cornerRadius: 12, style: .continuous)
         .fill(
           LinearGradient(
-            colors: [
-              Color.black.opacity(0.16),
-              palette.panelRaised.opacity(0.70)
-            ],
+            colors: [Color.black.opacity(0.16), palette.panelRaised.opacity(0.70)],
             startPoint: .top,
             endPoint: .bottom
           )
@@ -406,16 +294,20 @@ struct ExpandedDashboardView: View {
             .stroke(Color.white.opacity(0.10), lineWidth: 1)
         )
 
-      ConcentricGaugeView(primary: store.primary, secondary: store.secondary, palette: palette)
-        .id(palette.rawValue)
-        .frame(width: 292, height: 292)
-        .padding(.top, 2)
+      HStack(spacing: 26) {
+        ExpandedHeroRing(event: event, cool: cool, palette: palette, unavailable: unavailable)
+          .frame(width: 210, height: 210)
+        WindowQuickListView(event: event, cool: cool, palette: palette, unavailable: unavailable)
+          .frame(width: 250)
+      }
+      .padding(.horizontal, 26)
+      .padding(.top, 16)
 
-      if let freshnessText {
+      if let freshness {
         VStack {
           HStack {
             Spacer()
-            Text(freshnessText)
+            Text(freshness)
               .font(.system(size: 11, weight: .heavy))
               .foregroundStyle(DashboardColors.subtleText)
               .padding(.horizontal, 10)
@@ -430,27 +322,17 @@ struct ExpandedDashboardView: View {
         }
         .padding(14)
       }
-
-      VStack {
-        Spacer()
-        HStack(alignment: .bottom) {
-          resetCorner(
-            value: BalanceFormatters.resetCountdown(store.primary?.resetsAt, mode: .hours),
-            tint: palette.fiveHour,
-            alignment: .leading
-          )
-          Spacer()
-          resetCorner(
-            value: BalanceFormatters.resetCountdown(store.secondary?.resetsAt, mode: .days),
-            tint: palette.weekly,
-            alignment: .trailing
-          )
-        }
-        .padding(.horizontal, 24)
-        .padding(.bottom, 16)
-      }
     }
-    .frame(height: 320)
+    .frame(height: 268)
+  }
+
+  private var gaugePanel: some View {
+    heroGaugePanel(
+      event: store.status?.main,
+      cool: false,
+      unavailable: store.status?.main == nil,
+      freshness: freshnessText
+    )
   }
 
   private var freshnessText: String? {
@@ -490,26 +372,32 @@ struct ExpandedDashboardView: View {
   }
 
   private var overviewCards: some View {
+    windowOverviewCards(
+      event: store.status?.main, cool: false,
+      todayTokens: store.tokenStats.todayTokens, monthTokens: store.tokenStats.monthTokens
+    )
+  }
+
+  /// 动态窗口卡：每窗口一张余额卡 + 一张今日 Token 卡，窗口数任意
+  private func windowOverviewCards(
+    event: RateLimitEvent?, cool: Bool, todayTokens: Int, monthTokens: Int
+  ) -> some View {
     HStack(spacing: 12) {
-      MiniMetricCard(
-        title: "5 小时余额".l10n,
-        value: BalanceFormatters.percent(store.primary?.remainingPercent),
-        tint: palette.fiveHour,
-        footnote: L("已用 %@", BalanceFormatters.percent(store.primary?.usedPercent)),
-        surface: palette.panelRaised
-      )
-      MiniMetricCard(
-        title: "7 天余额".l10n,
-        value: BalanceFormatters.percent(store.secondary?.remainingPercent),
-        tint: palette.weekly,
-        footnote: L("已用 %@", BalanceFormatters.percent(store.secondary?.usedPercent)),
-        surface: palette.panelRaised
-      )
+      ForEach(Array((event?.resolvedWindows ?? []).enumerated()), id: \.offset) { index, labeled in
+        MiniMetricCard(
+          title: L("%@ 余额", labeled.label),
+          value: BalanceFormatters.percent(labeled.window.remainingPercent),
+          tint: palette.windowColor(cool: cool, index: index),
+          footnote: L("已用 %@", BalanceFormatters.percent(labeled.window.usedPercent))
+            + " · " + BalanceFormatters.resetCountdownShort(labeled.window.resetsAt, mode: labeled.isHourScale ? .hours : .days),
+          surface: palette.panelRaised
+        )
+      }
       MiniMetricCard(
         title: "今日 Token".l10n,
-        value: BalanceFormatters.compactNumber(store.tokenStats.todayTokens),
+        value: BalanceFormatters.compactNumber(todayTokens),
         tint: DashboardColors.text,
-        footnote: L("本月 %@", BalanceFormatters.compactNumber(store.tokenStats.monthTokens)),
+        footnote: L("本月 %@", BalanceFormatters.compactNumber(monthTokens)),
         surface: palette.panelRaised
       )
     }
@@ -992,10 +880,11 @@ struct ExpandedDashboardView: View {
             Text(BalanceFormatters.dateTime(event.timestamp))
               .foregroundStyle(DashboardColors.subtleText)
             Spacer()
-            Text(BalanceFormatters.percent(event.primary?.remainingPercent))
-              .foregroundStyle(palette.fiveHour)
-            Text(BalanceFormatters.percent(event.secondary?.remainingPercent))
-              .foregroundStyle(palette.weekly)
+            ForEach(Array(event.resolvedWindows.enumerated()), id: \.offset) { index, labeled in
+              Text(BalanceFormatters.percent(labeled.window.remainingPercent))
+                .foregroundStyle(palette.windowColor(cool: false, index: index))
+                .help(labeled.label)
+            }
           }
           .font(.system(size: 12, weight: .semibold))
           .monospacedDigit()

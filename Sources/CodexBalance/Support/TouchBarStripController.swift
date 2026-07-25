@@ -13,14 +13,22 @@ final class TouchBarStripController: NSObject, NSTouchBarDelegate {
   nonisolated static let trayIdentifier = NSTouchBarItem.Identifier("dev.codex.balance-dashboard.strip")
   nonisolated static let panelIdentifier = NSTouchBarItem.Identifier("dev.codex.balance-dashboard.panel")
 
+  struct TBWindow {
+    var label: String
+    var percent: Double?
+    var reset: Date?
+    var hourScale: Bool
+    var color: NSColor
+  }
+
   struct ToolData {
     var letter: String
-    var color5: NSColor
-    var color7: NSColor
-    var percent5: Double?
-    var percent7: Double?
-    var reset5: Date?
-    var reset7: Date?
+    var windows: [TBWindow]
+    var bottleneckIndex: Int
+
+    var bottleneck: TBWindow? {
+      windows.indices.contains(bottleneckIndex) ? windows[bottleneckIndex] : windows.first
+    }
   }
 
   private var trayItem: NSCustomTouchBarItem?
@@ -109,12 +117,8 @@ final class TouchBarStripController: NSObject, NSTouchBarDelegate {
   private func updateTrayText(tools: [ToolData]) {
     let text = NSMutableAttributedString()
     func tighter(_ tool: ToolData) -> (Double?, NSColor) {
-      let pairs: [(Double, NSColor)] = [
-        tool.percent5.map { ($0, tool.color5) },
-        tool.percent7.map { ($0, tool.color7) }
-      ].compactMap { $0 }
-      guard let minPair = pairs.min(by: { $0.0 < $1.0 }) else { return (nil, tool.color5) }
-      return (minPair.0, minPair.1)
+      guard let bottleneck = tool.bottleneck else { return (nil, .white) }
+      return (bottleneck.percent, bottleneck.color)
     }
     for (index, tool) in tools.enumerated() {
       if index > 0 {
@@ -284,12 +288,13 @@ private final class BalanceStripView: NSView {
 
   override var intrinsicContentSize: NSSize {
     let count = max(1, [codex, claude].compactMap { $0 }.count)
+    let maxWindows = CGFloat(max(codex?.windows.count ?? 0, claude?.windows.count ?? 0, 1))
     var perTool: CGFloat
     switch style {
-    case .barsQuad: perTool = isTight ? 178 : 268
+    case .barsQuad: perTool = (isTight ? 140 : 200) + maxWindows * 37
     case .bars: perTool = isTight ? 204 : 292
-    case .badgeQuad: perTool = 188
-    case .badge: perTool = 106
+    case .badgeQuad: perTool = 130 + (maxWindows - 1) * 26
+    case .badge: perTool = 106 + (maxWindows > 1 ? 10 : 0)
     }
     if !showsWindowTags { perTool -= (style == .badgeQuad ? 24 : 12) }
     let chipWidth: CGFloat = sessions.count == 1 ? 216 : (sessions.count == 2 ? 148 : 118)
@@ -415,82 +420,127 @@ private final class BalanceStripView: NSView {
     NSRect(x: x, y: 4, width: 1, height: bounds.height - 8).fill()
   }
 
-  /// 一个工具组，按当前样式绘制，返回结束 x 坐标
+  /// 一个工具组，按当前样式绘制（主视觉=瓶颈窗口，其余为卫星），返回结束 x 坐标
   @discardableResult
   private func drawTool(_ tool: TouchBarStripController.ToolData, startX: CGFloat) -> CGFloat {
     var x = startX
     let midY = bounds.midY
+    let bottleneck = tool.bottleneck
+    let heroColor = bottleneck?.color ?? .white
 
     let chipRect = NSRect(x: x, y: midY - 10, width: 20, height: 20)
     let chipPath = NSBezierPath(roundedRect: chipRect, xRadius: 5, yRadius: 5)
-    tool.color5.withAlphaComponent(0.92).setFill()
+    heroColor.withAlphaComponent(0.92).setFill()
     chipPath.fill()
     draw(text: tool.letter, at: NSPoint(x: chipRect.midX, y: midY), font: .systemFont(ofSize: 12, weight: .black), color: .black, centered: true)
     x = chipRect.maxX + 8
 
     let percentSuffix = showsPercentSign ? "%" : ""
-    func tighter() -> (Double?, Date?, CountdownMode, NSColor, String) {
-      let p5 = tool.percent5 ?? .infinity
-      let p7 = tool.percent7 ?? .infinity
-      if p5 <= p7 {
-        return (tool.percent5, tool.reset5, .hours, tool.color5, "5时".l10n)
-      }
-      return (tool.percent7, tool.reset7, .days, tool.color7, "7天".l10n)
-    }
 
     switch style {
     case .barsQuad:
-      // 两行：上 5时、下 7天；紧凑模式下条变短、省倒计时
-      let topY = bounds.height * 0.72
-      let bottomY = bounds.height * 0.28
-      let barWidth: CGFloat = isTight ? 62 : 116
+      // 全窗条：上=瓶颈主条行，下=全部窗口卫星微条行
+      let topY = bounds.height * 0.70
+      let bottomY = bounds.height * 0.26
+      let barWidth: CGFloat = isTight ? 62 : 108
       let widthTop = drawWindowRow(
-        label: "5时".l10n, percent: tool.percent5, reset: tool.reset5, mode: .hours, color: tool.color5,
-        startX: x, centerY: topY, barWidth: barWidth, showsCountdown: !isTight
+        label: bottleneck?.label ?? "--", percent: bottleneck?.percent,
+        reset: bottleneck?.reset, mode: (bottleneck?.hourScale ?? false) ? .hours : .days,
+        color: heroColor, startX: x, centerY: topY, barWidth: barWidth, showsCountdown: !isTight
       )
-      let widthBottom = drawWindowRow(
-        label: "7天".l10n, percent: tool.percent7, reset: tool.reset7, mode: .days, color: tool.color7,
-        startX: x, centerY: bottomY, barWidth: barWidth, showsCountdown: !isTight
-      )
-      return x + max(widthTop, widthBottom)
+      var sx = x
+      for (index, window) in tool.windows.enumerated() {
+        let tint = window.color
+        let micro = NSRect(x: sx, y: bottomY - 1.5, width: 16, height: 3)
+        tint.withAlphaComponent(0.25).setFill()
+        NSBezierPath(roundedRect: micro, xRadius: 1.5, yRadius: 1.5).fill()
+        let ratio = max(0, min(1, (window.percent ?? 0) / 100))
+        if ratio > 0.02 {
+          tint.setFill()
+          NSBezierPath(roundedRect: NSRect(x: sx, y: bottomY - 1.5, width: 16 * ratio, height: 3), xRadius: 1.5, yRadius: 1.5).fill()
+        }
+        if index == tool.bottleneckIndex {
+          NSColor.white.withAlphaComponent(0.55).setStroke()
+          let outline = NSBezierPath(roundedRect: micro.insetBy(dx: -0.5, dy: -0.5), xRadius: 2, yRadius: 2)
+          outline.lineWidth = 0.5
+          outline.stroke()
+        }
+        sx += 16 + 3
+        draw(text: window.percent.map { "\(Int($0.rounded()))" } ?? "--",
+             at: NSPoint(x: sx, y: bottomY),
+             font: .monospacedDigitSystemFont(ofSize: 8, weight: .bold),
+             color: tint)
+        sx += 18
+      }
+      return x + max(widthTop, sx - x)
     case .bars:
-      // 单行：更紧张窗口一条大进度条 + 顶满高度的大数字
-      let (percent, reset, mode, color, tag) = tighter()
+      // 单条：瓶颈窗口一条大进度条 + 大数字
       let width = drawWindowRow(
-        label: tag, percent: percent, reset: reset, mode: mode, color: color,
-        startX: x, centerY: midY, barWidth: isTight ? 72 : 128,
+        label: bottleneck?.label ?? "--", percent: bottleneck?.percent,
+        reset: bottleneck?.reset, mode: (bottleneck?.hourScale ?? false) ? .hours : .days,
+        color: heroColor, startX: x, centerY: midY, barWidth: isTight ? 72 : 128,
         percentFontSize: 22, percentAdvance: 60, showsCountdown: !isTight
       )
       return x + width
     case .badgeQuad:
-      // 竖排小标签在左、大号数字 + 数字下方「距刷新」下划线进度条
+      // 详述：瓶颈大数字（竖排标签+下划线）+ 其余窗口 chips [色点+小数字]
       var cx = x
-      for (percent, color, tag, reset, mode) in [
-        (tool.percent5, tool.color5, "5时".l10n, tool.reset5, CountdownMode.hours),
-        (tool.percent7, tool.color7, "7天".l10n, tool.reset7, CountdownMode.days)
-      ] {
-        let effective = (percent ?? 100) < 20 ? NSColor.systemRed : color
-        if showsWindowTags {
-          cx += drawVerticalLabel(tag, at: cx, centerY: midY, color: NSColor.white.withAlphaComponent(0.55)) + 3
-        }
-        let text = percent.map { "\(Int($0.rounded()))\(percentSuffix)" } ?? "--"
-        let numberWidth = drawBigNumber(text, at: cx, centerY: midY + 2, color: effective)
-        drawResetUnderline(x: cx, width: numberWidth, reset: reset, mode: mode, color: effective)
-        cx += numberWidth + 10
+      let effective = (bottleneck?.percent ?? 100) < 20 ? NSColor.systemRed : heroColor
+      if showsWindowTags, let label = bottleneck?.label {
+        cx += drawVerticalLabel(label, at: cx, centerY: midY, color: NSColor.white.withAlphaComponent(0.55)) + 3
+      }
+      let text = bottleneck?.percent.map { "\(Int($0.rounded()))\(percentSuffix)" } ?? "--"
+      let numberWidth = drawBigNumber(text, at: cx, centerY: midY + 2, color: effective)
+      drawResetUnderline(
+        x: cx, width: numberWidth, reset: bottleneck?.reset,
+        mode: (bottleneck?.hourScale ?? false) ? .hours : .days, color: effective
+      )
+      cx += numberWidth + 8
+      for (index, window) in tool.windows.enumerated() where index != tool.bottleneckIndex {
+        let dot = NSRect(x: cx, y: midY - 2, width: 4, height: 4)
+        window.color.setFill()
+        NSBezierPath(ovalIn: dot).fill()
+        cx += 6
+        draw(text: window.percent.map { "\(Int($0.rounded()))" } ?? "--",
+             at: NSPoint(x: cx, y: midY),
+             font: .monospacedDigitSystemFont(ofSize: 9, weight: .bold),
+             color: window.color)
+        cx += 20
       }
       return cx
     case .badge:
-      // 只有一个大数字（更紧张窗口），竖排标签在左，下方「距刷新」下划线
-      let (percent, reset, mode, color, tag) = tighter()
-      let effective = (percent ?? 100) < 20 ? NSColor.systemRed : color
+      // 数字微：瓶颈大数字 + 右侧竖排卫星点列
       var cx = x
-      if showsWindowTags {
-        cx += drawVerticalLabel(tag, at: cx, centerY: midY, color: NSColor.white.withAlphaComponent(0.55)) + 3
+      let effective = (bottleneck?.percent ?? 100) < 20 ? NSColor.systemRed : heroColor
+      if showsWindowTags, let label = bottleneck?.label {
+        cx += drawVerticalLabel(label, at: cx, centerY: midY, color: NSColor.white.withAlphaComponent(0.55)) + 3
       }
-      let text = percent.map { "\(Int($0.rounded()))\(percentSuffix)" } ?? "--"
+      let text = bottleneck?.percent.map { "\(Int($0.rounded()))\(percentSuffix)" } ?? "--"
       let numberWidth = drawBigNumber(text, at: cx, centerY: midY + 2, color: effective)
-      drawResetUnderline(x: cx, width: numberWidth, reset: reset, mode: mode, color: effective)
+      drawResetUnderline(
+        x: cx, width: numberWidth, reset: bottleneck?.reset,
+        mode: (bottleneck?.hourScale ?? false) ? .hours : .days, color: effective
+      )
       cx += numberWidth
+      if tool.windows.count > 1 {
+        cx += 4
+        let dotCount = tool.windows.count
+        let totalH = CGFloat(dotCount) * 4 + CGFloat(dotCount - 1) * 2
+        var dy = midY + totalH / 2 - 2
+        for (index, window) in tool.windows.enumerated() {
+          let used = 1 - max(0, min(1, (window.percent ?? 100) / 100))
+          window.color.withAlphaComponent(0.3 + 0.7 * used).setFill()
+          NSBezierPath(ovalIn: NSRect(x: cx, y: dy - 2, width: 4, height: 4)).fill()
+          if index == tool.bottleneckIndex {
+            NSColor.white.withAlphaComponent(0.6).setStroke()
+            let ring = NSBezierPath(ovalIn: NSRect(x: cx - 0.5, y: dy - 2.5, width: 5, height: 5))
+            ring.lineWidth = 0.5
+            ring.stroke()
+          }
+          dy -= 6
+        }
+        cx += 6
+      }
       return cx
     }
   }

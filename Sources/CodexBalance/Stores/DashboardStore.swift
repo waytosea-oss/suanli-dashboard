@@ -439,10 +439,22 @@ final class DashboardStore: ObservableObject {
       guard enabled else { return nil }
       var object: [String: Any] = [:]
       if let event {
+        // 旧字段保留（小度旧版兼容）
         if let p5 = event.primary?.remainingPercent { object["p5"] = p5 }
         if let p7 = event.secondary?.remainingPercent { object["p7"] = p7 }
         if let r5 = event.primary?.resetsAt { object["r5"] = r5.timeIntervalSince1970 }
         if let r7 = event.secondary?.resetsAt { object["r7"] = r7.timeIntervalSince1970 }
+        // 新结构：N 窗口列表
+        let windowList: [[String: Any]] = event.resolvedWindows.map { labeled in
+          var item: [String: Any] = [
+            "label": labeled.label,
+            "pct": labeled.window.remainingPercent,
+            "hourScale": labeled.isHourScale
+          ]
+          if let resets = labeled.window.resetsAt { item["reset"] = resets.timeIntervalSince1970 }
+          return item
+        }
+        if !windowList.isEmpty { object["windows"] = windowList }
       }
       if let stats, stats.sampleCount > 0 || stats.todayTokens > 0 {
         object["today"] = stats.todayTokens
@@ -479,24 +491,26 @@ final class DashboardStore: ObservableObject {
   private func updateTouchBar() {
     writeLiveBalanceFile()
     guard touchBarEnabled else { return }
-    func toolData(_ event: RateLimitEvent?, letter: String, c5: Color, c7: Color) -> TouchBarStripController.ToolData {
-      TouchBarStripController.ToolData(
-        letter: letter,
-        color5: NSColor(c5),
-        color7: NSColor(c7),
-        percent5: event?.primary?.remainingPercent,
-        percent7: event?.secondary?.remainingPercent,
-        reset5: event?.primary?.resetsAt,
-        reset7: event?.secondary?.resetsAt
+    func toolData(_ event: RateLimitEvent?, letter: String, cool: Bool) -> TouchBarStripController.ToolData {
+      let windows = (event?.resolvedWindows ?? []).enumerated().map { index, labeled in
+        TouchBarStripController.TBWindow(
+          label: labeled.label,
+          percent: labeled.window.remainingPercent,
+          reset: labeled.window.resetsAt,
+          hourScale: labeled.isHourScale,
+          color: NSColor(palette.windowColor(cool: cool, index: index))
+        )
+      }
+      let bottleneckIndex = event?.bottleneckWindow.flatMap { bottleneck in
+        event?.resolvedWindows.firstIndex { $0.label == bottleneck.label }
+      } ?? 0
+      return TouchBarStripController.ToolData(
+        letter: letter, windows: windows, bottleneckIndex: bottleneckIndex
       )
     }
     TouchBarStripController.shared.update(
-      codex: codexToolEnabled
-        ? toolData(status?.main, letter: "C", c5: palette.fiveHour, c7: palette.weekly)
-        : nil,
-      claude: claudeToolEnabled
-        ? toolData(claudeStatus?.main, letter: "A", c5: palette.claudeFiveHour, c7: palette.claudeWeekly)
-        : nil
+      codex: codexToolEnabled ? toolData(status?.main, letter: "C", cool: false) : nil,
+      claude: claudeToolEnabled ? toolData(claudeStatus?.main, letter: "A", cool: true) : nil
     )
     pushSessionsToTouchBar()
   }

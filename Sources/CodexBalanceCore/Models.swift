@@ -92,6 +92,19 @@ public enum TokenUsageCategory: String, CaseIterable, Identifiable, Sendable {
   }
 }
 
+/// 带标签的额度窗口：支持每工具任意个窗口（如 Codex 仅 7天；Claude 5时+周·全部+周·Fable）
+public struct LabeledWindow: Equatable, Sendable {
+  public var label: String        // 「7天」「5时」「周·全部」「周·Fable」等
+  public var window: LimitWindow
+  public var isHourScale: Bool    // 倒计时格式用：true=时分制，false=天时制
+
+  public init(label: String, window: LimitWindow, isHourScale: Bool) {
+    self.label = label
+    self.window = window
+    self.isHourScale = isHourScale
+  }
+}
+
 public struct RateLimitEvent: Identifiable, Equatable, Sendable {
   public var id: String { "\(limitID)-\(timestamp.timeIntervalSince1970)" }
   public var timestamp: Date
@@ -103,6 +116,8 @@ public struct RateLimitEvent: Identifiable, Equatable, Sendable {
   public var primary: LimitWindow?
   public var secondary: LimitWindow?
   public var reachedType: String?
+  /// N 窗口列表（新结构）；为空时由 primary/secondary 合成，保证旧数据兼容
+  public var windows: [LabeledWindow]
   public var usage: TokenUsage
   public var usageCategory: TokenUsageCategory
   public var projectName: String
@@ -118,6 +133,7 @@ public struct RateLimitEvent: Identifiable, Equatable, Sendable {
     primary: LimitWindow? = nil,
     secondary: LimitWindow? = nil,
     reachedType: String? = nil,
+    windows: [LabeledWindow] = [],
     usage: TokenUsage = TokenUsage(),
     usageCategory: TokenUsageCategory = .other,
     projectName: String = "未知项目".coreL10n,
@@ -132,10 +148,52 @@ public struct RateLimitEvent: Identifiable, Equatable, Sendable {
     self.primary = primary
     self.secondary = secondary
     self.reachedType = reachedType
+    self.windows = windows
     self.usage = usage
     self.usageCategory = usageCategory
     self.projectName = projectName
     self.projectPath = projectPath
+  }
+}
+
+public extension RateLimitEvent {
+  /// 统一出口：显式 windows 优先；否则由 primary/secondary 合成（旧行为）
+  var resolvedWindows: [LabeledWindow] {
+    if !windows.isEmpty { return windows }
+    var list: [LabeledWindow] = []
+    if let primary {
+      let hourScale = primary.windowMinutes > 0 && primary.windowMinutes <= 24 * 60
+      list.append(LabeledWindow(label: hourScale ? "5时".coreL10n : "7天".coreL10n, window: primary, isHourScale: hourScale))
+    }
+    if let secondary {
+      let hourScale = secondary.windowMinutes > 0 && secondary.windowMinutes <= 24 * 60
+      list.append(LabeledWindow(label: hourScale ? "5时".coreL10n : "7天".coreL10n, window: secondary, isHourScale: hourScale))
+    }
+    return list
+  }
+
+  /// 最紧张（剩余最少）的窗口——浮窗中心大数字/单条模式用
+  var tightestWindow: LabeledWindow? {
+    resolvedWindows.min { $0.window.remainingPercent < $1.window.remainingPercent }
+  }
+
+  /// 瓶颈窗口（主视觉用）：剩余% 最低者；60 分钟内即将重置的窗口按满额计
+  /// （马上就刷新的紧张没有意义）；打平时取重置更远者。
+  var bottleneckWindow: LabeledWindow? {
+    let now = Date()
+    func effectiveRemaining(_ labeled: LabeledWindow) -> Double {
+      if let resets = labeled.window.resetsAt, resets.timeIntervalSince(now) < 60 * 60 {
+        return 100
+      }
+      return labeled.window.remainingPercent
+    }
+    return resolvedWindows.min { lhs, rhs in
+      let l = effectiveRemaining(lhs), r = effectiveRemaining(rhs)
+      if abs(l - r) > 2 { return l < r }
+      let lReset = lhs.window.resetsAt ?? .distantFuture
+      let rReset = rhs.window.resetsAt ?? .distantFuture
+      return lReset > rReset
+    }
   }
 }
 

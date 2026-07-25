@@ -148,3 +148,4 @@
 "Touch Bar 尽力保持常亮" = "Touch Bar möglichst aktiv halten";
 "尝试阻止 Touch Bar 息屏；能否成功取决于机型与系统版本，新系统多半仍会息屏。会同时阻止主屏休眠，用电池注意续航" = "Versucht, das Abdunkeln der Touch Bar zu verhindern — hängt von Mac und macOS-Version ab; neuere Systeme dimmen meist trotzdem. Verhindert auch den Ruhezustand des Hauptbildschirms, Akku beachten.";
 "尽力保持 Touch Bar 常亮（系统底层控制，不保证生效）" = "Bestmöglich (vom System gesteuert, ohne Gewähr)";
+"%@ 余额" = "%@-Guthaben";

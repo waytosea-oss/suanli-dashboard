@@ -1536,11 +1536,37 @@ private final class CodexAppServerRateLimitSource: @unchecked Sendable {
     let mainID = payload.rateLimits.limitId ?? "codex"
     snapshots[mainID] = payload.rateLimits
 
+    func labeled(_ window: LimitWindow?) -> LabeledWindow? {
+      guard let window else { return nil }
+      let hourScale = window.windowMinutes > 0 && window.windowMinutes <= 24 * 60
+      return LabeledWindow(
+        label: hourScale ? "5时".coreL10n : "7天".coreL10n,
+        window: window,
+        isHourScale: hourScale
+      )
+    }
+
     return snapshots
       .values
-      .compactMap { snapshot in
+      .compactMap { snapshot -> RateLimitEvent? in
         guard let limitID = snapshot.limitId, limitID.isEmpty == false else {
           return nil
+        }
+        var windows = [labeled(normalize(snapshot.primary)), labeled(normalize(snapshot.secondary))].compactMap { $0 }
+        // 主限额事件吸收「有用量的子模型限额」为附加窗口（如 Spark 周限），0 用量不占位
+        if limitID == mainID {
+          for (otherID, other) in snapshots where otherID != mainID {
+            let scopeName = other.limitName ?? otherID
+            for candidate in [normalize(other.primary), normalize(other.secondary)].compactMap({ $0 })
+            where candidate.usedPercent > 0 {
+              let hourScale = candidate.windowMinutes > 0 && candidate.windowMinutes <= 24 * 60
+              windows.append(LabeledWindow(
+                label: LC("周·%@", scopeName),
+                window: candidate,
+                isHourScale: hourScale
+              ))
+            }
+          }
         }
         return RateLimitEvent(
           timestamp: now,
@@ -1551,7 +1577,8 @@ private final class CodexAppServerRateLimitSource: @unchecked Sendable {
           planType: snapshot.planType,
           primary: normalize(snapshot.primary),
           secondary: normalize(snapshot.secondary),
-          reachedType: snapshot.rateLimitReachedType
+          reachedType: snapshot.rateLimitReachedType,
+          windows: windows
         )
       }
   }

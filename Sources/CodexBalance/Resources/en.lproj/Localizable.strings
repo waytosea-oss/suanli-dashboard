@@ -148,3 +148,4 @@
 "Touch Bar 尽力保持常亮" = "Try to keep Touch Bar awake";
 "尝试阻止 Touch Bar 息屏；能否成功取决于机型与系统版本，新系统多半仍会息屏。会同时阻止主屏休眠，用电池注意续航" = "Attempts to keep the Touch Bar lit — success depends on your Mac and macOS version; newer systems usually still dim it. Also prevents the main display from sleeping, so mind battery.";
 "尽力保持 Touch Bar 常亮（系统底层控制，不保证生效）" = "Best-effort keep-awake (controlled by the system, not guaranteed)";
+"%@ 余额" = "%@ balance";
