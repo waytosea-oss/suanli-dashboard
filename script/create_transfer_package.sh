@@ -40,7 +40,6 @@ fi
 
 mkdir -p "$DEST_DIR" "$WATCHER_DIR" "$HOME/Library/LaunchAgents"
 /bin/launchctl bootout "gui/$(/usr/bin/id -u)" "$PLIST" >/dev/null 2>&1 || true
-/usr/bin/pkill -x CodexBalance >/dev/null 2>&1 || true
 /bin/sleep 1
 rm -rf "$DEST_APP"
 /usr/bin/ditto "$SOURCE_APP" "$DEST_APP"

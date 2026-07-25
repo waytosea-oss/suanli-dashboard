@@ -25,7 +25,9 @@ if [[ -n "$APP_PIDS" ]]; then
     pkill -P "$pid" -f 'codex app-server --listen stdio://' >/dev/null 2>&1 || true
   done <<< "$APP_PIDS"
 fi
-pkill -x "$EXECUTABLE_NAME" >/dev/null 2>&1 || true
+if [ "${OPEN_APP:-1}" != "0" ]; then
+  pkill -x "$EXECUTABLE_NAME" >/dev/null 2>&1 || true
+fi
 
 swift build -c release --product "$EXECUTABLE_NAME"
 BUILD_DIR="$(swift build -c release --show-bin-path)"
