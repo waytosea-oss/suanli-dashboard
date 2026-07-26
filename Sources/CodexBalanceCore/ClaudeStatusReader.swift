@@ -581,6 +581,16 @@ final class ClaudeOAuthUsageSource: @unchecked Sendable {
   private static let keychainLock = NSLock()
   nonisolated(unsafe) private static var keychainConsultedThisLaunch = false
 
+  /// 开发调试版（.build 下的裸二进制）禁止触碰钥匙串：
+  /// 未签名程序每次重编译对钥匙串都是全新身份，开发期反复重启会造成密码弹框风暴
+  /// （2026-07-26 事故：一晚重构测试导致用户输入上百次密码）。
+  /// 调试版只允许走自有缓存；正式安装版才可在缓存链断裂时读一次钥匙串。
+  private static var keychainForbidden: Bool {
+    if ProcessInfo.processInfo.environment["CODEXBALANCE_NO_KEYCHAIN"] == "1" { return true }
+    let executable = CommandLine.arguments.first ?? ""
+    return executable.contains("/.build/") || Bundle.main.bundlePath.contains("/.build/")
+  }
+
   private func readAccessToken() -> String? {
     // 钥匙串是最后手段：每次触碰都可能弹授权框（程序更新后必弹）。
     // 顺序：缓存 token 有效 → 直接用；缓存里有 refreshToken → 直接续期（零钥匙串接触）；
@@ -595,7 +605,9 @@ final class ClaudeOAuthUsageSource: @unchecked Sendable {
       return renewed.accessToken
     }
 
-    // 到这里说明缓存续期失败。钥匙串本次启动只碰一次，避免风暴。
+    // 到这里说明缓存续期失败。调试版直接放弃（绝不碰钥匙串）；
+    // 正式版本次启动也只碰一次，避免风暴。
+    guard !Self.keychainForbidden else { return nil }
     Self.keychainLock.lock()
     let alreadyTried = Self.keychainConsultedThisLaunch
     Self.keychainConsultedThisLaunch = true
