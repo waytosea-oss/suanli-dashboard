@@ -4,7 +4,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   func applicationDidFinishLaunching(_ notification: Notification) {
     // 单实例锁：LaunchAgent 守护 + 登录项 + 手动打开可能同时拉起多个副本，
     // 每个副本都会各自去读钥匙串 → 授权弹框风暴。这里只放行第一个，后来者立即退出。
-    guard Self.acquireSingleInstanceLock() else {
+    guard Self.acquireSingleInstanceLockEarly() else {
       // 已有实例在跑：把它带到前台，本副本退出
       let others = NSRunningApplication.runningApplications(
         withBundleIdentifier: Bundle.main.bundleIdentifier ?? "dev.codex.balance-dashboard"
@@ -18,6 +18,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   }
 
   nonisolated(unsafe) private static var lockFileDescriptor: Int32 = -1
+
+  /// App.init 里的最早入口：在任何业务对象创建前抢锁（幂等）
+  static func acquireSingleInstanceLockEarly() -> Bool {
+    if lockFileDescriptor >= 0 { return true }
+    return acquireSingleInstanceLock()
+  }
 
   /// 用文件锁保证全局单实例（跨「不同路径的同一程序」也有效，比 bundleID 判断更稳）
   private static func acquireSingleInstanceLock() -> Bool {

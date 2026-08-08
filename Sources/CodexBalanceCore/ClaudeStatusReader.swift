@@ -599,13 +599,20 @@ final class ClaudeOAuthUsageSource: @unchecked Sendable {
     if let cached, cached.isAccessTokenValid {
       return cached.accessToken
     }
-    if let refreshToken = cached?.refreshToken,
-       let renewed = renewAccessToken(refreshToken: refreshToken) {
-      writeRefreshCache(renewed)
-      return renewed.accessToken
+    if let refreshToken = cached?.refreshToken {
+      switch renewAccessTokenDetailed(refreshToken: refreshToken) {
+      case .success(let renewed):
+        writeRefreshCache(renewed)
+        return renewed.accessToken
+      case .networkFailure:
+        // 断网/超时（开机头几秒的常态）：与凭据无关，绝不碰钥匙串，等下轮重试
+        return nil
+      case .authRejected:
+        break // 链死，走恢复路径
+      }
     }
 
-    // 到这里说明缓存续期失败。调试版直接放弃（绝不碰钥匙串）；
+    // 到这里说明缓存链已死。调试版直接放弃（绝不碰钥匙串）；
     // 正式版本次启动也只碰一次，避免风暴。
     guard !Self.keychainForbidden else { return nil }
     Self.keychainLock.lock()
@@ -658,8 +665,21 @@ final class ClaudeOAuthUsageSource: @unchecked Sendable {
     try? data.write(to: refreshCacheURL, options: [.atomic, .completeFileProtection])
   }
 
+  private enum RenewOutcome {
+    case success(ClaudeOAuthCredentials)
+    case authRejected      // 4xx：refreshToken 已作废，链死
+    case networkFailure    // 超时/断网/5xx：与凭据无关，稍后重试即可
+  }
+
   private func renewAccessToken(refreshToken: String) -> ClaudeOAuthCredentials? {
-    guard let url = URL(string: "https://console.anthropic.com/v1/oauth/token") else { return nil }
+    if case .success(let credentials) = renewAccessTokenDetailed(refreshToken: refreshToken) {
+      return credentials
+    }
+    return nil
+  }
+
+  private func renewAccessTokenDetailed(refreshToken: String) -> RenewOutcome {
+    guard let url = URL(string: "https://console.anthropic.com/v1/oauth/token") else { return .networkFailure }
     var request = URLRequest(url: url)
     request.httpMethod = "POST"
     request.timeoutInterval = 12
@@ -669,13 +689,17 @@ final class ClaudeOAuthUsageSource: @unchecked Sendable {
       "refresh_token": refreshToken,
       "client_id": "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
     ]
-    guard let body = try? JSONSerialization.data(withJSONObject: payload) else { return nil }
+    guard let body = try? JSONSerialization.data(withJSONObject: payload) else { return .networkFailure }
     request.httpBody = body
 
     let semaphore = DispatchSemaphore(value: 0)
     let box = ClaudeFetchBox()
+    let statusBox = ClaudeStatusBox()
     URLSession.shared.dataTask(with: request) { data, response, _ in
       defer { semaphore.signal() }
+      if let httpResponse = response as? HTTPURLResponse {
+        statusBox.set(httpResponse.statusCode)
+      }
       guard let httpResponse = response as? HTTPURLResponse,
             (200..<300).contains(httpResponse.statusCode),
             let data,
@@ -685,16 +709,19 @@ final class ClaudeOAuthUsageSource: @unchecked Sendable {
     }.resume()
     _ = semaphore.wait(timeout: .now() + 12)
 
-    guard let object = box.value,
-          let accessToken = object["access_token"] as? String,
-          !accessToken.isEmpty
-    else { return nil }
-    let expiresIn = (object["expires_in"] as? Double) ?? 3600
-    return ClaudeOAuthCredentials(
-      accessToken: accessToken,
-      refreshToken: (object["refresh_token"] as? String) ?? refreshToken,
-      expiresAt: Date().addingTimeInterval(expiresIn)
-    )
+    if let object = box.value,
+       let accessToken = object["access_token"] as? String,
+       !accessToken.isEmpty {
+      let expiresIn = (object["expires_in"] as? Double) ?? 3600
+      return .success(ClaudeOAuthCredentials(
+        accessToken: accessToken,
+        refreshToken: (object["refresh_token"] as? String) ?? refreshToken,
+        expiresAt: Date().addingTimeInterval(expiresIn)
+      ))
+    }
+    // 4xx = 凭据被拒（链死）；其余（0=超时断网、5xx）都算网络问题
+    let code = statusBox.value
+    return (400..<500).contains(code) ? .authRejected : .networkFailure
   }
 
   private func readKeychainCredentials() -> ClaudeOAuthCredentials? {
@@ -715,23 +742,16 @@ final class ClaudeOAuthUsageSource: @unchecked Sendable {
       return readKeychainCredentials(service: "Claude Code-credentials")
     }
 
+    // 只读两个条目：上次成功的 + 无后缀主条目。带哈希后缀的条目实测只装
+    // MCP 插件授权（不含账号 token），逐个读取只会连环触发授权弹框。
     var services: [String] = []
-    for item in items {
-      guard let service = item[kSecAttrService as String] as? String,
-            service.hasPrefix("Claude Code-credentials")
-      else { continue }
-      services.append(service)
+    if let lastGood = UserDefaults.standard.string(forKey: Self.lastGoodServiceKey) {
+      services.append(lastGood)
     }
-    if services.isEmpty { services = ["Claude Code-credentials"] }
-    // 带后缀的（新版）优先于无后缀旧条目，减少无谓的过期条目授权弹框
-    services.sort { ($0.count, $0) > ($1.count, $1) }
-    // 上次成功读到账号凭据的条目排最前：正常情况下只触碰这一个条目，
-    // 其余条目（可能只装 MCP 插件授权）不再逐个读取，避免连环授权弹框
-    if let lastGood = UserDefaults.standard.string(forKey: Self.lastGoodServiceKey),
-       let index = services.firstIndex(of: lastGood) {
-      services.remove(at: index)
-      services.insert(lastGood, at: 0)
+    if !services.contains("Claude Code-credentials") {
+      services.append("Claude Code-credentials")
     }
+    _ = items // 服务名列表仅用于确认存在性，不再逐个读取
 
     var candidates: [ClaudeOAuthCredentials] = []
     for service in services {
@@ -791,6 +811,18 @@ final class ClaudeOAuthUsageSource: @unchecked Sendable {
       refreshToken: refreshToken,
       expiresAt: expiresAt
     )
+  }
+}
+
+private final class ClaudeStatusBox: @unchecked Sendable {
+  private let lock = NSLock()
+  private var storage = 0
+  var value: Int {
+    lock.lock(); defer { lock.unlock() }
+    return storage
+  }
+  func set(_ value: Int) {
+    lock.lock(); storage = value; lock.unlock()
   }
 }
 
