@@ -1,5 +1,4 @@
 import Foundation
-import Security
 
 /// 读取 Claude Code 本机数据：
 /// - token 用量：~/.claude/projects/<项目目录哈希>/<会话uuid>.jsonl 中 assistant 行的 message.usage，
@@ -576,25 +575,11 @@ final class ClaudeOAuthUsageSource: @unchecked Sendable {
     }
   }
 
-  /// 本次进程是否已经碰过钥匙串。碰过就不再碰——把「钥匙串授权弹框」限死为每次启动最多 1 次，
-  /// 杜绝续期失败时每 60 秒重试导致的密码风暴。下次启动（或重新登录后）自然会再给一次机会。
-  private static let keychainLock = NSLock()
-  nonisolated(unsafe) private static var keychainConsultedThisLaunch = false
-
-  /// 开发调试版（.build 下的裸二进制）禁止触碰钥匙串：
-  /// 未签名程序每次重编译对钥匙串都是全新身份，开发期反复重启会造成密码弹框风暴
-  /// （2026-07-26 事故：一晚重构测试导致用户输入上百次密码）。
-  /// 调试版只允许走自有缓存；正式安装版才可在缓存链断裂时读一次钥匙串。
-  private static var keychainForbidden: Bool {
-    if ProcessInfo.processInfo.environment["CODEXBALANCE_NO_KEYCHAIN"] == "1" { return true }
-    let executable = CommandLine.arguments.first ?? ""
-    return executable.contains("/.build/") || Bundle.main.bundlePath.contains("/.build/")
-  }
-
   private func readAccessToken() -> String? {
-    // 钥匙串是最后手段：每次触碰都可能弹授权框（程序更新后必弹）。
-    // 顺序：缓存 token 有效 → 直接用；缓存里有 refreshToken → 直接续期（零钥匙串接触）；
-    // 只有缓存链彻底断掉、且本次启动还没碰过钥匙串，才读一次钥匙串重建。
+    // 凭据来源只有两个：自有缓存（续期在此滚动）与 Claude 的明文凭据文件（如存在）。
+    // 钥匙串访问已从本程序中彻底移除——SecItemCopyMatching 会触发系统授权弹框，
+    // 历史上造成过五次密码风暴。链断裂时的恢复统一走外部脚本
+    // （修复Claude连接.command，用 Apple 签名的 security 工具读取，永不弹框）。
     let cached = readRefreshCache()
     if let cached, cached.isAccessTokenValid {
       return cached.accessToken
@@ -605,33 +590,23 @@ final class ClaudeOAuthUsageSource: @unchecked Sendable {
         writeRefreshCache(renewed)
         return renewed.accessToken
       case .networkFailure:
-        // 断网/超时（开机头几秒的常态）：与凭据无关，绝不碰钥匙串，等下轮重试
-        return nil
+        return nil // 断网/超时：与凭据无关，等下轮重试
       case .authRejected:
-        break // 链死，走恢复路径
+        break // 链死，试凭据文件
       }
     }
-
-    // 到这里说明缓存链已死。调试版直接放弃（绝不碰钥匙串）；
-    // 正式版本次启动也只碰一次，避免风暴。
-    guard !Self.keychainForbidden else { return nil }
-    Self.keychainLock.lock()
-    let alreadyTried = Self.keychainConsultedThisLaunch
-    Self.keychainConsultedThisLaunch = true
-    Self.keychainLock.unlock()
-    guard !alreadyTried else { return nil }
-
-    let credentials = readKeychainCredentials() ?? readCredentialsFileCredentials()
-    if let credentials, credentials.isAccessTokenValid {
-      // 顺手写进自己的缓存：之后续期全走缓存，不再读钥匙串
-      writeRefreshCache(credentials)
-      return credentials.accessToken
-    }
-    if let refreshToken = credentials?.refreshToken,
-       refreshToken != cached?.refreshToken,
-       let renewed = renewAccessToken(refreshToken: refreshToken) {
-      writeRefreshCache(renewed)
-      return renewed.accessToken
+    // 明文凭据文件（部分安装形态存在；纯文件读取，无任何系统弹框）
+    if let credentials = readCredentialsFileCredentials() {
+      if credentials.isAccessTokenValid {
+        writeRefreshCache(credentials)
+        return credentials.accessToken
+      }
+      if let refreshToken = credentials.refreshToken,
+         refreshToken != cached?.refreshToken,
+         let renewed = renewAccessToken(refreshToken: refreshToken) {
+        writeRefreshCache(renewed)
+        return renewed.accessToken
+      }
     }
     return nil
   }
@@ -722,70 +697,6 @@ final class ClaudeOAuthUsageSource: @unchecked Sendable {
     // 4xx = 凭据被拒（链死）；其余（0=超时断网、5xx）都算网络问题
     let code = statusBox.value
     return (400..<500).contains(code) ? .authRejected : .networkFailure
-  }
-
-  private func readKeychainCredentials() -> ClaudeOAuthCredentials? {
-    // 新版 Claude Code 把凭据存到带账号哈希后缀的服务名（如 "Claude Code-credentials-0a7b6ecb"），
-    // 旧的无后缀条目可能残留且已过期。
-    // 第 1 步：只列出服务名（不取数据，不需授权）；
-    // 第 2 步：对每个候选单独取数据（kSecMatchLimitOne 会触发钥匙串授权弹框，用户点「始终允许」即长期授权），
-    // 选其中 accessToken 未过期者；都过期则取 expiresAt 最新的（其 refreshToken 也最可能有效）。
-    let listQuery: [String: Any] = [
-      kSecClass as String: kSecClassGenericPassword,
-      kSecReturnAttributes as String: true,
-      kSecMatchLimit as String: kSecMatchLimitAll
-    ]
-    var listResult: CFTypeRef?
-    guard SecItemCopyMatching(listQuery as CFDictionary, &listResult) == errSecSuccess,
-          let items = listResult as? [[String: Any]]
-    else {
-      return readKeychainCredentials(service: "Claude Code-credentials")
-    }
-
-    // 只读两个条目：上次成功的 + 无后缀主条目。带哈希后缀的条目实测只装
-    // MCP 插件授权（不含账号 token），逐个读取只会连环触发授权弹框。
-    var services: [String] = []
-    if let lastGood = UserDefaults.standard.string(forKey: Self.lastGoodServiceKey) {
-      services.append(lastGood)
-    }
-    if !services.contains("Claude Code-credentials") {
-      services.append("Claude Code-credentials")
-    }
-    _ = items // 服务名列表仅用于确认存在性，不再逐个读取
-
-    var candidates: [ClaudeOAuthCredentials] = []
-    for service in services {
-      if let parsed = readKeychainCredentials(service: service) {
-        candidates.append(parsed)
-        if parsed.isAccessTokenValid {
-          UserDefaults.standard.set(service, forKey: Self.lastGoodServiceKey)
-          return parsed
-        }
-      }
-    }
-    if candidates.isEmpty { return nil }
-    return candidates.max { lhs, rhs in
-      let l = lhs.expiresAt ?? .distantPast
-      let r = rhs.expiresAt ?? .distantPast
-      if l == r { return (rhs.refreshToken != nil) && (lhs.refreshToken == nil) }
-      return l < r
-    }
-  }
-
-  private static let lastGoodServiceKey = "claudeKeychainLastGoodService"
-
-  private func readKeychainCredentials(service: String) -> ClaudeOAuthCredentials? {
-    let query: [String: Any] = [
-      kSecClass as String: kSecClassGenericPassword,
-      kSecAttrService as String: service,
-      kSecReturnData as String: true,
-      kSecMatchLimit as String: kSecMatchLimitOne
-    ]
-    var item: CFTypeRef?
-    guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
-          let data = item as? Data
-    else { return nil }
-    return credentials(fromCredentialsData: data)
   }
 
   private func readCredentialsFileCredentials() -> ClaudeOAuthCredentials? {

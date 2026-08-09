@@ -16,6 +16,7 @@ OPEN_APP=0 ./script/build_and_run.sh
 rm -rf "$PACKAGE_DIR" "$ZIP_PATH"
 mkdir -p "$PACKAGE_DIR"
 ditto "$DIST_DIR/$APP_NAME.app" "$PACKAGE_DIR/$APP_NAME.app"
+cp "$ROOT_DIR/resources/修复Claude连接.command" "$PACKAGE_DIR/" 2>/dev/null || true
 
 cat > "$PACKAGE_DIR/安装并启用自动启动.command" <<'INSTALLER'
 #!/bin/zsh
