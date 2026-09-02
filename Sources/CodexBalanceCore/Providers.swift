@@ -304,6 +304,13 @@ public final class APIKeyBalanceSource: @unchecked Sendable {
       // 智谱用量监控接口：Authorization 直接放 Key，不带 Bearer
       request.setValue(entry.apiKey, forHTTPHeaderField: "Authorization")
       request.setValue("zh-CN,zh", forHTTPHeaderField: "Accept-Language")
+    } else if provider == .grok {
+      // grok.com 网页内部接口：POST + 登录 Cookie。用户贴的可能是裸 sso 值，也可能是整串 Cookie
+      request.httpMethod = "POST"
+      request.httpBody = try? JSONSerialization.data(withJSONObject: ["requestKind": "DEFAULT", "modelName": "grok-4-auto"])
+      request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+      request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Safari/537.36", forHTTPHeaderField: "User-Agent")
+      request.setValue(Self.grokCookieHeader(entry.apiKey), forHTTPHeaderField: "Cookie")
     } else {
       request.setValue("Bearer \(entry.apiKey)", forHTTPHeaderField: "Authorization")
     }
@@ -351,6 +358,7 @@ public final class APIKeyBalanceSource: @unchecked Sendable {
     case .siliconflow: URL(string: "https://api.siliconflow.cn/v1/user/info")
     case .openrouter: URL(string: "https://openrouter.ai/api/v1/auth/key")
     case .glm: URL(string: "https://open.bigmodel.cn/api/monitor/usage/quota/limit")
+    case .grok: URL(string: "https://grok.com/rest/rate-limits")
     case .codex, .claude: nil
     }
   }
@@ -363,6 +371,7 @@ public final class APIKeyBalanceSource: @unchecked Sendable {
     now: Date
   ) -> ProviderSnapshot {
     if provider == .glm { return glmSnapshot(from: object, now: now) }
+    if provider == .grok { return grokSnapshot(from: object, now: now) }
     let symbol = provider.currencySymbol
     var balance: BalanceMetric?
 
@@ -411,7 +420,7 @@ public final class APIKeyBalanceSource: @unchecked Sendable {
           balance = BalanceMetric(amount: -usage, currencySymbol: symbol, reference: nil, usedAmount: usage)
         }
       }
-    case .codex, .claude, .glm:
+    case .codex, .claude, .glm, .grok:
       break
     }
 
@@ -466,23 +475,36 @@ extension APIKeyBalanceSource {
       return ProviderSnapshot(provider: .glm, fetchedAt: now, sourceName: name, errorMessage: message)
     }
     var windows: [LabeledWindow] = []
-    let tokenLimits = limits.filter { ($0["type"] as? String) == "TOKENS_LIMIT" }
+    // 2026-09 实测返回：type 为 CREDIT_LIMIT（老脚本里叫 TOKENS_LIMIT），unit 3=小时 / 6=月（number 是几个单位）
+    let tokenLimits = limits.filter { ["TOKENS_LIMIT", "CREDIT_LIMIT"].contains($0["type"] as? String ?? "") }
     for limit in tokenLimits {
       guard let used = number(limit["percentage"]) else { continue }
-      let isFiveHour = number(limit["number"]) == 5
-        || ((limit["unit"] as? String)?.uppercased().hasPrefix("HOUR") ?? false)
+      let unit = Int(number(limit["unit"]) ?? 0)
+      let count = Int(number(limit["number"]) ?? 0)
+      let unitText = (limit["unit"] as? String)?.uppercased() ?? ""
+      let label: String
+      let minutes: Double
+      switch (unit, unitText) {
+      case (3, _), (_, "HOUR"), (_, "HOURS"):
+        label = "\(max(count, 1))时"; minutes = Double(max(count, 1)) * 60
+      case (4, _), (_, "DAY"), (_, "DAYS"):
+        label = count == 7 ? "周" : "\(max(count, 1))天"; minutes = Double(max(count, 1)) * 24 * 60
+      case (5, _), (_, "WEEK"), (_, "WEEKS"):
+        label = "周"; minutes = 7 * 24 * 60
+      case (6, _), (_, "MONTH"), (_, "MONTHS"):
+        label = "月"; minutes = 30 * 24 * 60
+      default:
+        label = count == 5 ? "5时" : "额度"; minutes = count == 5 ? 300 : 7 * 24 * 60
+      }
       let reset = number(limit["nextResetTime"]).map { Date(timeIntervalSince1970: $0 / 1000) }
       windows.append(LabeledWindow(
-        label: isFiveHour ? "5时" : "周",
-        window: LimitWindow(
-          usedPercent: used, remainingPercent: max(0, 100 - used),
-          windowMinutes: isFiveHour ? 300 : 7 * 24 * 60, resetsAt: reset
-        ),
-        isHourScale: isFiveHour
+        label: label,
+        window: LimitWindow(usedPercent: used, remainingPercent: max(0, 100 - used), windowMinutes: minutes, resetsAt: reset),
+        isHourScale: minutes < 24 * 60
       ))
     }
-    // 5 小时窗口排前面
-    windows.sort { $0.isHourScale && !$1.isHourScale }
+    // 短窗口排前面
+    windows.sort { $0.window.windowMinutes < $1.window.windowMinutes }
     if let mcp = limits.first(where: { ["MCP_LIMIT", "TIME_LIMIT"].contains($0["type"] as? String ?? "") }),
        let used = number(mcp["percentage"]) {
       let reset = number(mcp["nextResetTime"]).map { Date(timeIntervalSince1970: $0 / 1000) }
@@ -497,5 +519,50 @@ extension APIKeyBalanceSource {
     }
     let level = (data["level"] as? String).map { " · " + $0.uppercased() } ?? ""
     return ProviderSnapshot(provider: .glm, fetchedAt: now, windows: windows, sourceName: name + level)
+  }
+}
+
+
+// MARK: - SuperGrok（grok.com 内部限额接口，登录 Cookie）
+
+extension APIKeyBalanceSource {
+  /// 用户贴裸的 sso 值 → 拼成 "sso=...; sso-rw=..."；贴的是带 "=" 的整串 Cookie → 原样发
+  public static func grokCookieHeader(_ raw: String) -> String {
+    let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+    if trimmed.contains("=") { return trimmed }
+    return "sso=\(trimmed); sso-rw=\(trimmed)"
+  }
+
+  /// 两种返回：
+  ///   扁平：{"remainingQueries":12,"totalQueries":20,"windowSizeSeconds":7200}
+  ///   分档：{"highEffortRateLimits":{"remainingQueries":35,"totalQueries":50,"waitTimeSeconds":7200},
+  ///         "lowEffortRateLimits":{"remainingQueries":120,"totalQueries":140,"waitTimeSeconds":1800}}
+  /// 接口只给窗口长度不给重置时刻，所以 resetsAt 标 inferredReset。
+  public static func grokSnapshot(from object: [String: Any], now: Date) -> ProviderSnapshot {
+    let name = ToolID.grok.vendorName
+    func window(_ dict: [String: Any], label: String) -> LabeledWindow? {
+      guard let remaining = number(dict["remainingQueries"]), let total = number(dict["totalQueries"]), total > 0 else { return nil }
+      let seconds = number(dict["windowSizeSeconds"]) ?? number(dict["waitTimeSeconds"]) ?? 0
+      let remainingPercent = min(100, max(0, remaining / total * 100))
+      return LabeledWindow(
+        label: label,
+        window: LimitWindow(
+          usedPercent: 100 - remainingPercent, remainingPercent: remainingPercent,
+          windowMinutes: seconds / 60,
+          resetsAt: seconds > 0 ? now.addingTimeInterval(seconds) : nil,
+          inferredReset: true
+        ),
+        isHourScale: seconds < 24 * 3600
+      )
+    }
+    var windows: [LabeledWindow] = []
+    if let high = object["highEffortRateLimits"] as? [String: Any], let w = window(high, label: "专家") { windows.append(w) }
+    if let low = object["lowEffortRateLimits"] as? [String: Any], let w = window(low, label: "快速") { windows.append(w) }
+    if windows.isEmpty, let w = window(object, label: "查询") { windows.append(w) }
+    guard !windows.isEmpty else {
+      let message = (object["message"] as? String).map { LC("接口返回：%@", $0) } ?? "接口返回里没有额度字段".coreL10n
+      return ProviderSnapshot(provider: .grok, fetchedAt: now, sourceName: name, errorMessage: message)
+    }
+    return ProviderSnapshot(provider: .grok, fetchedAt: now, windows: windows, sourceName: name)
   }
 }

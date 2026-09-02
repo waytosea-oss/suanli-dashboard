@@ -65,7 +65,7 @@
 - **10 种界面语言**：跟随系统自动切换，设置里也可手动选
 - **隐私原则**：只读本机日志与凭据、不上传任何数据、拿不到数据就显示「暂无数据」，绝不编数字
 
-## 一点五、接入其他平台（GLM / DeepSeek / Kimi / SiliconFlow / OpenRouter）
+## 一点五、接入其他平台（GLM / SuperGrok / DeepSeek / Kimi / SiliconFlow / OpenRouter）
 
 1. 展开面板 → 右上角「设置」→「监控平台」→ **添加平台** 下拉菜单里选一个；
 2. 在该平台那一行填入你的 **API Key**，回车或点「保存」；Key 从哪拿：点行尾的 ❓ 直接跳到平台控制台；
@@ -77,6 +77,7 @@
 | Kimi (Moonshot) | 可用余额（含代金券 + 现金） | `GET api.moonshot.cn/v1/users/me/balance` |
 | SiliconFlow | 总余额（含赠送 + 充值） | `GET api.siliconflow.cn/v1/user/info` |
 | OpenRouter | Key 剩余额度（有上限时）或已消耗 | `GET openrouter.ai/api/v1/auth/key` |
+| SuperGrok | grok.com 订阅的剩余查询次数（专家 / 快速两档）。**没有公开接口**，用的是网页内部接口 + 你的登录 Cookie（grok.com → 开发者工具 → Cookies → `sso`），Cookie 过期就要重贴 | `POST grok.com/rest/rate-limits` |
 | 智谱 GLM Coding Plan | 5 小时 / 每周 / MCP 三个窗口的剩余百分比（和 Claude 一样是订阅制，不是余额） | `GET open.bigmodel.cn/api/monitor/usage/quota/limit` |
 
 **环的比例怎么来的**：这些平台按量计费，没有"用了百分之多少"的概念，只有一个金额。码表用「满额基准」把金额折成比例画环——默认取**历史最高余额**（充完值第一次刷新就记住了），也可以在那一行的「满额基准」框里手填（比如你习惯充 100 就填 100）。没有基准时环不画弧、只显示金额，**不会编一个百分比出来**。

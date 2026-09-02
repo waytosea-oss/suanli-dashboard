@@ -1,4 +1,5 @@
 import AppKit
+import ObjectiveC
 
 @MainActor
 enum WindowConfigurator {
@@ -51,6 +52,9 @@ enum WindowConfigurator {
   ) {
     window.title = "算力码表"
     window.styleMask = [.borderless, .resizable]
+    // 纯 borderless 窗口 canBecomeKey == false，里面的文本框永远是灰的、打不进字（设置面板的 API Key 栏因此失效过）。
+    // 加标题栏会多画一条黑底，所以直接把这个窗口类的 canBecomeKey 改成 true，外观不动。
+    allowBecomingKey(window)
     window.isOpaque = false
     window.backgroundColor = .clear
     window.hasShadow = false
@@ -64,6 +68,22 @@ enum WindowConfigurator {
     let targetSize = compact ? resolvedCompactSize : expandedSize
     let origin = keepPosition ? window.frame.origin : topRightOrigin(for: targetSize, window: window)
     window.setFrame(NSRect(origin: origin, size: targetSize), display: true, animate: true)
+  }
+
+  private static var patchedClasses = Set<ObjectIdentifier>()
+
+  /// 把 SwiftUI 生成的这个窗口类的 canBecomeKey / canBecomeMain 换成恒 true（只影响本 App 自己的窗口类）
+  private static func allowBecomingKey(_ window: NSWindow) {
+    let cls: AnyClass = type(of: window)
+    guard patchedClasses.insert(ObjectIdentifier(cls)).inserted else { return }
+    let yes: @convention(block) (AnyObject) -> Bool = { _ in true }
+    for selector in [#selector(getter: NSWindow.canBecomeKey), #selector(getter: NSWindow.canBecomeMain)] {
+      guard let method = class_getInstanceMethod(cls, selector) else { continue }
+      let imp = imp_implementationWithBlock(unsafeBitCast(yes, to: AnyObject.self))
+      if !class_addMethod(cls, selector, imp, method_getTypeEncoding(method)) {
+        method_setImplementation(method, imp)
+      }
+    }
   }
 
   private static func topRightOrigin(for size: NSSize, window: NSWindow) -> NSPoint {

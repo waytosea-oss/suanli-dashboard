@@ -7,6 +7,7 @@ public enum ToolID: String, CaseIterable, Codable, Identifiable, Sendable {
   case codex
   case claude
   case glm
+  case grok
   case deepseek
   case moonshot
   case siliconflow
@@ -19,6 +20,7 @@ public enum ToolID: String, CaseIterable, Codable, Identifiable, Sendable {
     case .codex: "Codex"
     case .claude: "Claude"
     case .glm: "GLM"
+    case .grok: "Grok"
     case .deepseek: "DeepSeek"
     case .moonshot: "Kimi"
     case .siliconflow: "SiliconFlow"
@@ -32,6 +34,7 @@ public enum ToolID: String, CaseIterable, Codable, Identifiable, Sendable {
     case .codex: "OpenAI Codex"
     case .claude: "Claude Code"
     case .glm: "智谱 GLM Coding Plan"
+    case .grok: "SuperGrok（grok.com 订阅）"
     case .deepseek: "DeepSeek 开放平台"
     case .moonshot: "Moonshot / Kimi 开放平台"
     case .siliconflow: "硅基流动 SiliconFlow"
@@ -45,6 +48,7 @@ public enum ToolID: String, CaseIterable, Codable, Identifiable, Sendable {
     case .codex: "C"
     case .claude: "A"
     case .glm: "G"
+    case .grok: "X"
     case .deepseek: "D"
     case .moonshot: "K"
     case .siliconflow: "S"
@@ -56,7 +60,7 @@ public enum ToolID: String, CaseIterable, Codable, Identifiable, Sendable {
   public var kind: ProviderKind {
     switch self {
     case .codex, .claude: .subscriptionWindows
-    case .glm: .apiSubscription
+    case .glm, .grok: .apiSubscription
     case .deepseek, .moonshot, .siliconflow, .openrouter: .prepaidBalance
     }
   }
@@ -67,12 +71,18 @@ public enum ToolID: String, CaseIterable, Codable, Identifiable, Sendable {
   /// 需要用户填 API Key 的平台（预付费余额 + API 拉取的订阅窗口）
   public var usesAPIKey: Bool { kind != .subscriptionWindows }
 
-  /// 取色族序号：0 暖(Codex) 1 冷(Claude) 2 青绿 3 紫 4 橙 5 靛 6 绿(GLM)
+  /// 设置面板凭证输入框的标签：绝大多数是 API Key，SuperGrok 没有公开接口，用的是 grok.com 登录 Cookie
+  public var credentialLabel: String {
+    self == .grok ? "grok.com 的 sso Cookie" : "API Key"
+  }
+
+  /// 取色族序号：0 暖(Codex) 1 冷(Claude) 2 青绿 3 紫 4 橙 5 靛 6 绿(GLM) 7 银(Grok)
   public var colorFamily: Int {
     switch self {
     case .codex: 0
     case .claude: 1
     case .glm: 6
+    case .grok: 7
     case .deepseek: 2
     case .moonshot: 3
     case .siliconflow: 4
@@ -85,6 +95,7 @@ public enum ToolID: String, CaseIterable, Codable, Identifiable, Sendable {
     switch self {
     case .codex, .claude: nil
     case .glm: URL(string: "https://bigmodel.cn/usercenter/proj-mgmt/apikeys")
+    case .grok: URL(string: "https://grok.com")
     case .deepseek: URL(string: "https://platform.deepseek.com/api_keys")
     case .moonshot: URL(string: "https://platform.moonshot.cn/console/api-keys")
     case .siliconflow: URL(string: "https://cloud.siliconflow.cn/account/ak")
@@ -97,7 +108,7 @@ public enum ToolID: String, CaseIterable, Codable, Identifiable, Sendable {
     switch self {
     case .openrouter: "$"
     case .deepseek, .moonshot, .siliconflow: "¥"
-    case .codex, .claude, .glm: ""
+    case .codex, .claude, .glm, .grok: ""
     }
   }
 }

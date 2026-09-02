@@ -183,3 +183,5 @@
 "按 5 小时 / 每周窗口滚动重置" = "Rolling 5-hour / weekly windows";
 "%@ 剩余" = "%@ left";
 "剩余" = "Left";
+"grok.com 的 sso Cookie" = "grok.com sso cookie";
+"打开 grok.com → 浏览器开发者工具 → Application → Cookies → 复制 sso 的值贴进来。只存本机。" = "Open grok.com → browser DevTools → Application → Cookies → copy the sso value here. Stored locally only.";

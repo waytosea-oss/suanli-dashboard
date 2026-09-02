@@ -134,7 +134,7 @@ extension DashboardPalette {
   }
 
   /// 按平台色族取色（ToolID.colorFamily）：
-  ///   0 暖族 Codex   1 冷族 Claude   2 青绿 DeepSeek   3 紫 Kimi   4 橙 SiliconFlow   5 靛 OpenRouter   6 绿 GLM
+  ///   0 暖族 Codex   1 冷族 Claude   2 青绿 DeepSeek   3 紫 Kimi   4 橙 SiliconFlow   5 靛 OpenRouter   6 绿 GLM   7 银 Grok
   /// 每族内部再按窗口序号取色；序号超出用族内色循环。
   func windowColor(family: Int, index: Int) -> Color {
     let warm: [Color] = [fiveHour, weekly, Color(red: 0.94, green: 0.63, blue: 0.51)]
@@ -146,7 +146,8 @@ extension DashboardPalette {
     let orange: [Color] = [Color(red: 1.00, green: 0.66, blue: 0.36), Color(red: 0.92, green: 0.52, blue: 0.28)]
     let indigo: [Color] = [Color(red: 0.55, green: 0.66, blue: 1.00), Color(red: 0.42, green: 0.52, blue: 0.90)]
     let green: [Color] = [Color(red: 0.47, green: 0.86, blue: 0.50), Color(red: 0.34, green: 0.70, blue: 0.44), Color(red: 0.70, green: 0.88, blue: 0.55)]
-    let families = [warm, cold, teal, violet, orange, indigo, green]
+    let silver: [Color] = [Color(red: 0.86, green: 0.88, blue: 0.92), Color(red: 0.62, green: 0.66, blue: 0.74)]
+    let families = [warm, cold, teal, violet, orange, indigo, green, silver]
     let chosen = families[max(0, family) % families.count]
     return chosen[max(0, index) % chosen.count]
   }

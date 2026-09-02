@@ -1030,7 +1030,7 @@ struct ExpandedDashboardView: View {
 
       if provider.usesAPIKey {
         HStack(spacing: 8) {
-          SecureField("API Key".l10n, text: Binding(
+          SecureField(provider.credentialLabel.l10n, text: Binding(
             get: { keyDrafts[provider] ?? store.apiKey(for: provider) },
             set: { keyDrafts[provider] = $0 }
           ))
@@ -1058,7 +1058,7 @@ struct ExpandedDashboardView: View {
             }
             .buttonStyle(.plain)
             .foregroundStyle(DashboardColors.subtleText)
-            .help("去平台控制台获取 API Key".l10n)
+            .help(provider == .grok ? "打开 grok.com → 浏览器开发者工具 → Application → Cookies → 复制 sso 的值贴进来。只存本机。".l10n : "去平台控制台获取 API Key".l10n)
           }
         }
         .padding(.leading, 17)

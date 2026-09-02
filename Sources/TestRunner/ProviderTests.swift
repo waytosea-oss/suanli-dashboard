@@ -193,6 +193,28 @@ struct GLMParserTests {
     #expect(snap.sourceName.contains("PRO"))
   }
 
+  @Test func parsesRealCreditLimitShape() {
+    // 2026-09-03 用真实 Key 实测的返回（lite 套餐）
+    let object: [String: Any] = [
+      "code": 200, "msg": "操作成功", "success": true,
+      "data": [
+        "level": "lite",
+        "limits": [
+          ["type": "CREDIT_LIMIT", "unit": 3, "number": 5, "usage": 2000, "currentValue": 0, "remaining": 2000, "percentage": 0],
+          ["type": "CREDIT_LIMIT", "unit": 6, "number": 1, "usage": 10000, "currentValue": 11, "remaining": 9988, "percentage": 1, "nextResetTime": 1_788_407_059_991]
+        ] as [[String: Any]]
+      ] as [String: Any]
+    ]
+    let snap = APIKeyBalanceSource.glmSnapshot(from: object, now: Date())
+    #expect(snap.isAvailable)
+    #expect(snap.windows.map(\.label) == ["5时", "月"])
+    #expect(snap.windows[0].window.remainingPercent == 100)
+    #expect(snap.windows[0].isHourScale)
+    #expect(snap.windows[1].window.remainingPercent == 99)
+    #expect(snap.windows[1].window.resetsAt == Date(timeIntervalSince1970: 1_788_407_059.991))
+    #expect(snap.sourceName.contains("LITE"))
+  }
+
   @Test func missingLimitsIsAnErrorNotZero() {
     let snap = APIKeyBalanceSource.glmSnapshot(from: ["code": 401, "msg": "令牌已过期", "success": false], now: Date())
     #expect(!snap.isAvailable)
@@ -205,5 +227,41 @@ struct GLMParserTests {
     #expect(ToolID.glm.usesAPIKey)
     #expect(ToolID.glm.currencySymbol.isEmpty)
     #expect(APIKeyBalanceSource.endpoint(for: .glm)?.host == "open.bigmodel.cn")
+  }
+}
+
+
+@Suite("SuperGrok 解析")
+struct GrokParserTests {
+  @Test func parsesEffortTiers() {
+    let now = Date(timeIntervalSince1970: 1_700_000_000)
+    let object: [String: Any] = [
+      "highEffortRateLimits": ["remainingQueries": 35, "totalQueries": 50, "waitTimeSeconds": 7200],
+      "lowEffortRateLimits": ["remainingQueries": 120, "totalQueries": 160, "waitTimeSeconds": 1800]
+    ]
+    let snap = APIKeyBalanceSource.grokSnapshot(from: object, now: now)
+    #expect(snap.isAvailable)
+    #expect(snap.windows.map(\.label) == ["专家", "快速"])
+    #expect(snap.windows[0].window.remainingPercent == 70)
+    #expect(snap.windows[0].window.resetsAt == now.addingTimeInterval(7200))
+    #expect(snap.windows[0].window.inferredReset)
+    #expect(snap.windows[1].window.remainingPercent == 75)
+  }
+
+  @Test func parsesFlatShape() {
+    let snap = APIKeyBalanceSource.grokSnapshot(from: ["remainingQueries": 12, "totalQueries": 20, "windowSizeSeconds": 7200], now: Date())
+    #expect(snap.windows.count == 1)
+    #expect(snap.windows[0].window.remainingPercent == 60)
+  }
+
+  @Test func unauthenticatedIsError() {
+    let snap = APIKeyBalanceSource.grokSnapshot(from: ["code": 16, "message": "No credentials presented."], now: Date())
+    #expect(!snap.isAvailable)
+    #expect(snap.errorMessage?.contains("No credentials") == true)
+  }
+
+  @Test func cookieHeaderShapes() {
+    #expect(APIKeyBalanceSource.grokCookieHeader(" abc123 ") == "sso=abc123; sso-rw=abc123")
+    #expect(APIKeyBalanceSource.grokCookieHeader("sso=abc; other=1") == "sso=abc; other=1")
   }
 }
