@@ -287,8 +287,8 @@ public final class APIKeyBalanceSource: @unchecked Sendable {
 
   /// 同步抓取（测试与「测试连接」按钮用）
   public func fetch(_ provider: ToolID, now: Date = Date()) -> ProviderSnapshot {
-    guard provider.kind == .prepaidBalance else {
-      return ProviderSnapshot(provider: provider, fetchedAt: now, sourceName: "", errorMessage: "不是余额类平台")
+    guard provider.usesAPIKey else {
+      return ProviderSnapshot(provider: provider, fetchedAt: now, sourceName: "", errorMessage: "不是 API Key 平台")
     }
     guard let entry = keyStore.entry(for: provider), !entry.apiKey.isEmpty else {
       return ProviderSnapshot(provider: provider, fetchedAt: now, sourceName: provider.vendorName, errorMessage: "未填写 API Key".coreL10n)
@@ -300,7 +300,13 @@ public final class APIKeyBalanceSource: @unchecked Sendable {
     var request = URLRequest(url: url)
     request.httpMethod = "GET"
     request.timeoutInterval = 12
-    request.setValue("Bearer \(entry.apiKey)", forHTTPHeaderField: "Authorization")
+    if provider == .glm {
+      // 智谱用量监控接口：Authorization 直接放 Key，不带 Bearer
+      request.setValue(entry.apiKey, forHTTPHeaderField: "Authorization")
+      request.setValue("zh-CN,zh", forHTTPHeaderField: "Accept-Language")
+    } else {
+      request.setValue("Bearer \(entry.apiKey)", forHTTPHeaderField: "Authorization")
+    }
     request.setValue("application/json", forHTTPHeaderField: "Accept")
 
     let semaphore = DispatchSemaphore(value: 0)
@@ -344,6 +350,7 @@ public final class APIKeyBalanceSource: @unchecked Sendable {
     case .moonshot: URL(string: "https://api.moonshot.cn/v1/users/me/balance")
     case .siliconflow: URL(string: "https://api.siliconflow.cn/v1/user/info")
     case .openrouter: URL(string: "https://openrouter.ai/api/v1/auth/key")
+    case .glm: URL(string: "https://open.bigmodel.cn/api/monitor/usage/quota/limit")
     case .codex, .claude: nil
     }
   }
@@ -355,6 +362,7 @@ public final class APIKeyBalanceSource: @unchecked Sendable {
     keyStore: ProviderKeyStore?,
     now: Date
   ) -> ProviderSnapshot {
+    if provider == .glm { return glmSnapshot(from: object, now: now) }
     let symbol = provider.currencySymbol
     var balance: BalanceMetric?
 
@@ -403,7 +411,7 @@ public final class APIKeyBalanceSource: @unchecked Sendable {
           balance = BalanceMetric(amount: -usage, currencySymbol: symbol, reference: nil, usedAmount: usage)
         }
       }
-    case .codex, .claude:
+    case .codex, .claude, .glm:
       break
     }
 
@@ -437,5 +445,57 @@ private final class FetchResultBox: @unchecked Sendable {
   var value: (Data?, Int, Error?) {
     lock.lock(); defer { lock.unlock() }
     return storage
+  }
+}
+
+
+// MARK: - 智谱 GLM Coding Plan（订阅窗口，走用量监控接口）
+
+extension APIKeyBalanceSource {
+  /// {"code":200,"success":true,"data":{"level":"pro","limits":[
+  ///   {"type":"TOKENS_LIMIT","number":5,"unit":"HOUR","percentage":44,"nextResetTime":1770000000000},
+  ///   {"type":"TOKENS_LIMIT","number":7,"unit":"DAY","percentage":53,"nextResetTime":...},
+  ///   {"type":"TIME_LIMIT","percentage":7,"usage":1000,"currentValue":72,"remaining":928}]}}
+  /// percentage = 已用百分比；nextResetTime = 毫秒时间戳；number==5 的 TOKENS_LIMIT 是 5 小时窗口，另一个是每周。
+  public static func glmSnapshot(from object: [String: Any], now: Date) -> ProviderSnapshot {
+    let name = ToolID.glm.vendorName
+    guard let data = object["data"] as? [String: Any],
+          let limits = data["limits"] as? [[String: Any]]
+    else {
+      let message = (object["msg"] as? String).map { LC("接口返回：%@", $0) } ?? "接口返回里没有额度字段".coreL10n
+      return ProviderSnapshot(provider: .glm, fetchedAt: now, sourceName: name, errorMessage: message)
+    }
+    var windows: [LabeledWindow] = []
+    let tokenLimits = limits.filter { ($0["type"] as? String) == "TOKENS_LIMIT" }
+    for limit in tokenLimits {
+      guard let used = number(limit["percentage"]) else { continue }
+      let isFiveHour = number(limit["number"]) == 5
+        || ((limit["unit"] as? String)?.uppercased().hasPrefix("HOUR") ?? false)
+      let reset = number(limit["nextResetTime"]).map { Date(timeIntervalSince1970: $0 / 1000) }
+      windows.append(LabeledWindow(
+        label: isFiveHour ? "5时" : "周",
+        window: LimitWindow(
+          usedPercent: used, remainingPercent: max(0, 100 - used),
+          windowMinutes: isFiveHour ? 300 : 7 * 24 * 60, resetsAt: reset
+        ),
+        isHourScale: isFiveHour
+      ))
+    }
+    // 5 小时窗口排前面
+    windows.sort { $0.isHourScale && !$1.isHourScale }
+    if let mcp = limits.first(where: { ["MCP_LIMIT", "TIME_LIMIT"].contains($0["type"] as? String ?? "") }),
+       let used = number(mcp["percentage"]) {
+      let reset = number(mcp["nextResetTime"]).map { Date(timeIntervalSince1970: $0 / 1000) }
+      windows.append(LabeledWindow(
+        label: "MCP",
+        window: LimitWindow(usedPercent: used, remainingPercent: max(0, 100 - used), windowMinutes: 30 * 24 * 60, resetsAt: reset),
+        isHourScale: false
+      ))
+    }
+    guard !windows.isEmpty else {
+      return ProviderSnapshot(provider: .glm, fetchedAt: now, sourceName: name, errorMessage: "接口返回里没有额度字段".coreL10n)
+    }
+    let level = (data["level"] as? String).map { " · " + $0.uppercased() } ?? ""
+    return ProviderSnapshot(provider: .glm, fetchedAt: now, windows: windows, sourceName: name + level)
   }
 }

@@ -41,3 +41,6 @@
 "接口返回里没有余额字段" = "No balance field in response";
 "网络错误：%@" = "Network error: %@";
 "接口返回 HTTP %d" = "HTTP %d from API";
+
+"接口返回里没有额度字段" = "No quota field in response";
+"接口返回：%@" = "API said: %@";

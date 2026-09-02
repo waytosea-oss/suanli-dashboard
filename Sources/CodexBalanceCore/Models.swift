@@ -6,6 +6,7 @@ import Foundation
 public enum ToolID: String, CaseIterable, Codable, Identifiable, Sendable {
   case codex
   case claude
+  case glm
   case deepseek
   case moonshot
   case siliconflow
@@ -17,6 +18,7 @@ public enum ToolID: String, CaseIterable, Codable, Identifiable, Sendable {
     switch self {
     case .codex: "Codex"
     case .claude: "Claude"
+    case .glm: "GLM"
     case .deepseek: "DeepSeek"
     case .moonshot: "Kimi"
     case .siliconflow: "SiliconFlow"
@@ -29,6 +31,7 @@ public enum ToolID: String, CaseIterable, Codable, Identifiable, Sendable {
     switch self {
     case .codex: "OpenAI Codex"
     case .claude: "Claude Code"
+    case .glm: "智谱 GLM Coding Plan"
     case .deepseek: "DeepSeek 开放平台"
     case .moonshot: "Moonshot / Kimi 开放平台"
     case .siliconflow: "硅基流动 SiliconFlow"
@@ -41,6 +44,7 @@ public enum ToolID: String, CaseIterable, Codable, Identifiable, Sendable {
     switch self {
     case .codex: "C"
     case .claude: "A"
+    case .glm: "G"
     case .deepseek: "D"
     case .moonshot: "K"
     case .siliconflow: "S"
@@ -52,6 +56,7 @@ public enum ToolID: String, CaseIterable, Codable, Identifiable, Sendable {
   public var kind: ProviderKind {
     switch self {
     case .codex, .claude: .subscriptionWindows
+    case .glm: .apiSubscription
     case .deepseek, .moonshot, .siliconflow, .openrouter: .prepaidBalance
     }
   }
@@ -59,11 +64,15 @@ public enum ToolID: String, CaseIterable, Codable, Identifiable, Sendable {
   /// 只有 Codex / Claude 在本机留有会话日志（token 看板、最近会话、iCloud 同步都依赖它）
   public var hasLocalLogs: Bool { kind == .subscriptionWindows }
 
-  /// 取色族序号：0 暖(Codex) 1 冷(Claude) 2 青绿 3 紫 4 橙 5 靛
+  /// 需要用户填 API Key 的平台（预付费余额 + API 拉取的订阅窗口）
+  public var usesAPIKey: Bool { kind != .subscriptionWindows }
+
+  /// 取色族序号：0 暖(Codex) 1 冷(Claude) 2 青绿 3 紫 4 橙 5 靛 6 绿(GLM)
   public var colorFamily: Int {
     switch self {
     case .codex: 0
     case .claude: 1
+    case .glm: 6
     case .deepseek: 2
     case .moonshot: 3
     case .siliconflow: 4
@@ -75,6 +84,7 @@ public enum ToolID: String, CaseIterable, Codable, Identifiable, Sendable {
   public var apiKeyHelpURL: URL? {
     switch self {
     case .codex, .claude: nil
+    case .glm: URL(string: "https://bigmodel.cn/usercenter/proj-mgmt/apikeys")
     case .deepseek: URL(string: "https://platform.deepseek.com/api_keys")
     case .moonshot: URL(string: "https://platform.moonshot.cn/console/api-keys")
     case .siliconflow: URL(string: "https://cloud.siliconflow.cn/account/ak")
@@ -87,7 +97,7 @@ public enum ToolID: String, CaseIterable, Codable, Identifiable, Sendable {
     switch self {
     case .openrouter: "$"
     case .deepseek, .moonshot, .siliconflow: "¥"
-    case .codex, .claude: ""
+    case .codex, .claude, .glm: ""
     }
   }
 }
@@ -97,6 +107,8 @@ public enum ProviderKind: String, Codable, Sendable {
   case subscriptionWindows
   /// 预付费：接口返回账户余额金额，本工具据此折算「剩余比例」画环
   case prepaidBalance
+  /// 订阅制但要用 API Key 去官方用量接口拉窗口（智谱 GLM Coding Plan）
+  case apiSubscription
 }
 
 public struct LimitWindow: Equatable, Sendable {

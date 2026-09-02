@@ -290,6 +290,8 @@ struct ExpandedDashboardView: View {
                 .foregroundStyle(DashboardColors.subtleText)
                 .fixedSize(horizontal: false, vertical: true)
             }
+          } else if !tool.unavailable, tool.event != nil {
+            WindowQuickListView(event: tool.event, family: tool.colorFamily, palette: palette)
           } else {
             Text(tool.errorMessage ?? "暂无数据 · 在设置里填入 API Key".l10n)
               .font(.system(size: 12, weight: .semibold))
@@ -338,7 +340,26 @@ struct ExpandedDashboardView: View {
   /// 余额卡 + 说明卡：这类平台按量计费，没有「几点重置」的概念
   private func providerCards(_ tool: DisplayTool) -> some View {
     let tint = palette.toolColor(family: tool.colorFamily)
-    return HStack(spacing: 12) {
+    if tool.id.kind == .apiSubscription {
+      let bottleneck = tool.event?.bottleneckWindow
+      return AnyView(HStack(spacing: 12) {
+        MiniMetricCard(
+          title: bottleneck.map { L("%@ 剩余", $0.label) } ?? "剩余".l10n,
+          value: tool.unavailable ? "--" : BalanceFormatters.percent(bottleneck?.window.remainingPercent),
+          tint: tint,
+          footnote: bottleneck.map { BalanceFormatters.resetCountdown($0.window.resetsAt, mode: $0.isHourScale ? .hours : .days) } ?? (tool.errorMessage ?? "--"),
+          surface: palette.panelRaised
+        )
+        MiniMetricCard(
+          title: "计费方式".l10n,
+          value: "订阅".l10n,
+          tint: DashboardColors.text,
+          footnote: "按 5 小时 / 每周窗口滚动重置".l10n,
+          surface: palette.panelRaised
+        )
+      })
+    }
+    return AnyView(HStack(spacing: 12) {
       MiniMetricCard(
         title: "账户余额".l10n,
         value: tool.balance?.amountText ?? "--",
@@ -353,7 +374,7 @@ struct ExpandedDashboardView: View {
         footnote: "用多少扣多少，不按时间窗口重置".l10n,
         surface: palette.panelRaised
       )
-    }
+    })
   }
 
   private var allSummaryBoard: some View {
@@ -379,6 +400,21 @@ struct ExpandedDashboardView: View {
             primaryTint: palette.claudeFiveHour,
             secondaryTint: palette.claudeWeekly
           )
+        }
+      }
+      ForEach(store.displayTools.filter { $0.id.kind == .apiSubscription }) { tool in
+        HStack(spacing: 8) {
+          Text(tool.name)
+            .font(.system(size: 12, weight: .heavy))
+            .foregroundStyle(palette.toolColor(family: tool.colorFamily))
+            .frame(width: 52, alignment: .leading)
+          Text(tool.unavailable
+               ? (tool.errorMessage ?? "--")
+               : (tool.event?.resolvedWindows ?? []).map { "\($0.label) \(BalanceFormatters.percent($0.window.remainingPercent))" }.joined(separator: " · "))
+            .font(.system(size: 12, weight: .heavy, design: .rounded))
+            .foregroundStyle(DashboardColors.text)
+            .monospacedDigit()
+          Spacer()
         }
       }
       ForEach(store.displayTools.filter { $0.id.kind == .prepaidBalance }) { tool in
@@ -992,7 +1028,7 @@ struct ExpandedDashboardView: View {
         .foregroundStyle(DashboardColors.text)
       }
 
-      if provider.kind == .prepaidBalance {
+      if provider.usesAPIKey {
         HStack(spacing: 8) {
           SecureField("API Key".l10n, text: Binding(
             get: { keyDrafts[provider] ?? store.apiKey(for: provider) },
@@ -1005,15 +1041,17 @@ struct ExpandedDashboardView: View {
             .font(.system(size: 11, weight: .heavy))
             .buttonStyle(.bordered)
             .controlSize(.small)
-          TextField("满额基准".l10n, text: Binding(
-            get: { referenceDrafts[provider] ?? store.referenceAmount(for: provider).map { String(format: "%.0f", $0) } ?? "" },
-            set: { referenceDrafts[provider] = $0 }
-          ))
-          .textFieldStyle(.roundedBorder)
-          .font(.system(size: 11, design: .monospaced))
-          .frame(width: 78)
-          .onSubmit { commitReference(provider) }
-          .help("画环用的「满额」金额，例如你平时充 100 就填 100；留空则按历史最高余额".l10n)
+          if provider.kind == .prepaidBalance {
+            TextField("满额基准".l10n, text: Binding(
+              get: { referenceDrafts[provider] ?? store.referenceAmount(for: provider).map { String(format: "%.0f", $0) } ?? "" },
+              set: { referenceDrafts[provider] = $0 }
+            ))
+            .textFieldStyle(.roundedBorder)
+            .font(.system(size: 11, design: .monospaced))
+            .frame(width: 78)
+            .onSubmit { commitReference(provider) }
+            .help("画环用的「满额」金额，例如你平时充 100 就填 100；留空则按历史最高余额".l10n)
+          }
           if let url = provider.apiKeyHelpURL {
             Button { NSWorkspace.shared.open(url) } label: {
               Image(systemName: "questionmark.circle").font(.system(size: 12, weight: .heavy))

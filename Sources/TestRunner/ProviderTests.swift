@@ -150,10 +150,11 @@ struct ToolIDMetadataTests {
   @Test func kindsAndLettersAreConsistent() {
     for tool in ToolID.allCases {
       #expect(tool.letter.count == 1)
-      if tool.kind == .prepaidBalance {
+      if tool.usesAPIKey {
         #expect(APIKeyBalanceSource.endpoint(for: tool) != nil)
         #expect(tool.apiKeyHelpURL != nil)
-        #expect(!tool.currencySymbol.isEmpty)
+        #expect(!tool.hasLocalLogs)
+        if tool.kind == .prepaidBalance { #expect(!tool.currencySymbol.isEmpty) }
       } else {
         #expect(tool.hasLocalLogs)
         #expect(APIKeyBalanceSource.endpoint(for: tool) == nil)
@@ -161,5 +162,48 @@ struct ToolIDMetadataTests {
     }
     let families = Set(ToolID.allCases.map(\.colorFamily))
     #expect(families.count == ToolID.allCases.count)
+  }
+}
+
+
+@Suite("智谱 GLM Coding Plan 解析")
+struct GLMParserTests {
+  @Test func parsesFiveHourWeeklyAndMCP() {
+    let now = Date(timeIntervalSince1970: 1_700_000_000)
+    let object: [String: Any] = [
+      "code": 200, "success": true,
+      "data": [
+        "level": "pro",
+        "limits": [
+          ["type": "TOKENS_LIMIT", "number": 7, "unit": "DAY", "percentage": 53, "nextResetTime": 1_700_400_000_000],
+          ["type": "TOKENS_LIMIT", "number": 5, "unit": "HOUR", "percentage": 44, "nextResetTime": 1_700_010_000_000],
+          ["type": "TIME_LIMIT", "percentage": 7, "usage": 1000, "currentValue": 72, "remaining": 928]
+        ] as [[String: Any]]
+      ] as [String: Any]
+    ]
+    let snap = APIKeyBalanceSource.glmSnapshot(from: object, now: now)
+    #expect(snap.isAvailable)
+    #expect(snap.windows.map(\.label) == ["5时", "周", "MCP"])
+    #expect(snap.windows[0].window.remainingPercent == 56)
+    #expect(snap.windows[0].isHourScale)
+    #expect(snap.windows[0].window.resetsAt == Date(timeIntervalSince1970: 1_700_010_000))
+    #expect(snap.windows[1].window.remainingPercent == 47)
+    #expect(!snap.windows[1].isHourScale)
+    #expect(snap.windows[2].window.remainingPercent == 93)
+    #expect(snap.sourceName.contains("PRO"))
+  }
+
+  @Test func missingLimitsIsAnErrorNotZero() {
+    let snap = APIKeyBalanceSource.glmSnapshot(from: ["code": 401, "msg": "令牌已过期", "success": false], now: Date())
+    #expect(!snap.isAvailable)
+    #expect(snap.windows.isEmpty)
+    #expect(snap.errorMessage?.contains("令牌已过期") == true)
+  }
+
+  @Test func glmIsAnAPIKeySubscriptionProvider() {
+    #expect(ToolID.glm.kind == .apiSubscription)
+    #expect(ToolID.glm.usesAPIKey)
+    #expect(ToolID.glm.currencySymbol.isEmpty)
+    #expect(APIKeyBalanceSource.endpoint(for: .glm)?.host == "open.bigmodel.cn")
   }
 }

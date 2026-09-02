@@ -46,7 +46,7 @@
 | 机型 | Apple Silicon (M 系列) | Release 提供的安装包为 arm64；Intel Mac 请从源码构建 |
 | 监控 Codex | 本机安装并登录过 Codex（桌面版或 CLI） | 没装则在设置里关掉 Codex 即可 |
 | 监控 Claude | 本机用 **Claude Code CLI** 登录过一次 | 详见下方「Claude 余额显示前提」，只用网页版/桌面版是读不到余额的 |
-| 监控 DeepSeek / Kimi / SiliconFlow / OpenRouter | 该平台的 **API Key** | 在设置里「添加平台」后填入；Key 只存本机 `~/Library/Application Support/CodexBalanceDashboard/provider-keys.json`（权限 0600），不进钥匙串、不上传 |
+| 监控 GLM / DeepSeek / Kimi / SiliconFlow / OpenRouter | 该平台的 **API Key** | 在设置里「添加平台」后填入；Key 只存本机 `~/Library/Application Support/CodexBalanceDashboard/provider-keys.json`（权限 0600），不进钥匙串、不上传 |
 | 网络 | 能正常访问 OpenAI / Anthropic 服务 | 余额接口请求发往官方服务器，网络不通时显示「暂无数据」 |
 | Touch Bar 功能 | 带 Touch Bar 的 MacBook Pro | 没有 Touch Bar 的机器该选项自动置灰，其他功能不受影响 |
 | 多设备同步 | 各设备登录同一 iCloud 账号，开启 iCloud Drive | 只用一台 Mac 可完全忽略 |
@@ -57,7 +57,7 @@
 
 重度使用 Codex / Claude Code 的人都遇到过：干着干着突然「额度用完了」。算力码表把两个工具的 **5 小时滚动窗口**和 **7 天窗口**余额变成一个始终可见的小仪表，让你随时知道还剩多少、什么时候刷新。
 
-- **多平台监控（v1.2 起）**：在设置里的「添加平台」下拉菜单里选，选几个显示几个——Codex、Claude Code 读本机登录状态；**DeepSeek、Kimi (Moonshot)、SiliconFlow、OpenRouter** 填自己的 API Key 读账户余额。顺序可调、随时增减，浮窗 / Touch Bar / 面板全部跟随
+- **多平台监控（v1.2 起）**：在设置里的「添加平台」下拉菜单里选，选几个显示几个——Codex、Claude Code 读本机登录状态；**智谱 GLM Coding Plan** 填 API Key 读订阅窗口；**DeepSeek、Kimi (Moonshot)、SiliconFlow、OpenRouter** 填自己的 API Key 读账户余额。顺序可调、随时增减，浮窗 / Touch Bar / 面板全部跟随
 - **两种额度形态一套版式**：订阅制（5 时 / 7 天窗口，显示剩余百分比）与预付费（显示余额金额，环的比例按「满额基准」折算——默认取历史最高余额，也可手填）
 - **5 种悬浮样式**：双环 / 长条 / 长条·全 / 徽章 / 徽章·全，标准与迷你两档，自动避让不挡内容
 - **Touch Bar 常驻**（带 Touch Bar 机型）：4 种面板样式、大数字模式、距刷新进度线（倒计时/正计时两种方向）、最近 AI 会话一键直达、合盖外接屏时浮窗自动接管（另有"尽力保持 Touch Bar 常亮"选项，但息屏由系统底层控制，新系统多半仍会息屏，属尽力而为）
@@ -65,7 +65,7 @@
 - **10 种界面语言**：跟随系统自动切换，设置里也可手动选
 - **隐私原则**：只读本机日志与凭据、不上传任何数据、拿不到数据就显示「暂无数据」，绝不编数字
 
-## 一点五、接入其他平台（DeepSeek / Kimi / SiliconFlow / OpenRouter）
+## 一点五、接入其他平台（GLM / DeepSeek / Kimi / SiliconFlow / OpenRouter）
 
 1. 展开面板 → 右上角「设置」→「监控平台」→ **添加平台** 下拉菜单里选一个；
 2. 在该平台那一行填入你的 **API Key**，回车或点「保存」；Key 从哪拿：点行尾的 ❓ 直接跳到平台控制台；
@@ -77,6 +77,7 @@
 | Kimi (Moonshot) | 可用余额（含代金券 + 现金） | `GET api.moonshot.cn/v1/users/me/balance` |
 | SiliconFlow | 总余额（含赠送 + 充值） | `GET api.siliconflow.cn/v1/user/info` |
 | OpenRouter | Key 剩余额度（有上限时）或已消耗 | `GET openrouter.ai/api/v1/auth/key` |
+| 智谱 GLM Coding Plan | 5 小时 / 每周 / MCP 三个窗口的剩余百分比（和 Claude 一样是订阅制，不是余额） | `GET open.bigmodel.cn/api/monitor/usage/quota/limit` |
 
 **环的比例怎么来的**：这些平台按量计费，没有"用了百分之多少"的概念，只有一个金额。码表用「满额基准」把金额折成比例画环——默认取**历史最高余额**（充完值第一次刷新就记住了），也可以在那一行的「满额基准」框里手填（比如你习惯充 100 就填 100）。没有基准时环不画弧、只显示金额，**不会编一个百分比出来**。
 

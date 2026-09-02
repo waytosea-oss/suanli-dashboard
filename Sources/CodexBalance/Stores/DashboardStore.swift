@@ -226,7 +226,7 @@ final class DashboardStore: ObservableObject {
   func enable(_ provider: ToolID) {
     guard !enabledProviders.contains(provider) else { return }
     enabledProviders.append(provider)
-    if provider.kind == .prepaidBalance { refreshAPIProviders(force: true) }
+    if provider.usesAPIKey { refreshAPIProviders(force: true) }
   }
 
   func disable(_ provider: ToolID) {
@@ -256,7 +256,7 @@ final class DashboardStore: ObservableObject {
       default:
         let snapshot = providerSnapshots[provider]
         let event: RateLimitEvent? = snapshot.flatMap { snap in
-          guard snap.balance != nil else { return nil }
+          guard snap.isAvailable else { return nil }
           return RateLimitEvent(
             timestamp: snap.fetchedAt,
             sourceName: snap.sourceName,
@@ -300,7 +300,7 @@ final class DashboardStore: ObservableObject {
 
   /// 拉取所有已启用的预付费平台余额（各自 4 分钟节流 + 失败退避）
   func refreshAPIProviders(force: Bool = false) {
-    for provider in enabledProviders where provider.kind == .prepaidBalance {
+    for provider in enabledProviders where provider.usesAPIKey {
       providerBalanceSource.refreshInBackground(provider, force: force) { [weak self] snapshot in
         Task { @MainActor in
           guard let self else { return }
