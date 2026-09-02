@@ -6,6 +6,7 @@ struct ExpandedDashboardView: View {
   @State private var showSettings = false
   /// 设置面板里正在编辑的 API Key / 满额基准草稿（回车或失焦才写入）
   @State private var keyDrafts: [ToolID: String] = [:]
+  @State private var guideProvider: ToolID?
   @State private var referenceDrafts: [ToolID: String] = [:]
   private var palette: DashboardPalette { store.palette }
 
@@ -322,6 +323,47 @@ struct ExpandedDashboardView: View {
       .padding(14)
     }
     .frame(height: 268)
+  }
+
+  /// ❓ 弹出的分步指南：各家取凭证的路径不一样，一步一条 + 直达按钮
+  private func credentialGuideView(_ provider: ToolID) -> some View {
+    VStack(alignment: .leading, spacing: 10) {
+      HStack(spacing: 8) {
+        Circle().fill(palette.toolColor(family: provider.colorFamily)).frame(width: 8, height: 8)
+        Text(L("怎么拿到 %@ 的%@", provider.displayName, provider.credentialLabel.l10n))
+          .font(.system(size: 13, weight: .heavy))
+        Spacer()
+      }
+      ForEach(Array(provider.credentialGuide.enumerated()), id: \.offset) { index, step in
+        HStack(alignment: .top, spacing: 8) {
+          Text("\(index + 1)")
+            .font(.system(size: 11, weight: .heavy, design: .rounded))
+            .frame(width: 18, height: 18)
+            .background(Circle().fill(palette.toolColor(family: provider.colorFamily).opacity(0.25)))
+          Text(step.l10n)
+            .font(.system(size: 12, weight: .medium))
+            .fixedSize(horizontal: false, vertical: true)
+        }
+      }
+      Divider()
+      HStack {
+        Text("凭证只存这台 Mac，权限 0600，不进钥匙串、不上传".l10n)
+          .font(.system(size: 10.5, weight: .semibold))
+          .foregroundStyle(.secondary)
+        Spacer()
+        if let url = provider.apiKeyHelpURL {
+          Button {
+            NSWorkspace.shared.open(url)
+          } label: {
+            Label(L("打开 %@", url.host ?? provider.displayName), systemImage: "arrow.up.right.square")
+              .font(.system(size: 11, weight: .heavy))
+          }
+          .controlSize(.small)
+        }
+      }
+    }
+    .padding(14)
+    .frame(width: 360)
   }
 
   private func providerDetailRow(_ title: String, _ value: String, tint: Color?) -> some View {
@@ -1052,13 +1094,19 @@ struct ExpandedDashboardView: View {
             .onSubmit { commitReference(provider) }
             .help("画环用的「满额」金额，例如你平时充 100 就填 100；留空则按历史最高余额".l10n)
           }
-          if let url = provider.apiKeyHelpURL {
-            Button { NSWorkspace.shared.open(url) } label: {
+          if provider.apiKeyHelpURL != nil {
+            Button { guideProvider = (guideProvider == provider) ? nil : provider } label: {
               Image(systemName: "questionmark.circle").font(.system(size: 12, weight: .heavy))
             }
             .buttonStyle(.plain)
             .foregroundStyle(DashboardColors.subtleText)
-            .help(provider == .grok ? "打开 grok.com → 浏览器开发者工具 → Application → Cookies → 复制 sso 的值贴进来。只存本机。".l10n : "去平台控制台获取 API Key".l10n)
+            .help("怎么拿到这个凭证：一步步教".l10n)
+            .popover(isPresented: Binding(
+              get: { guideProvider == provider },
+              set: { if !$0 { guideProvider = nil } }
+            ), arrowEdge: .trailing) {
+              credentialGuideView(provider)
+            }
           }
         }
         .padding(.leading, 17)

@@ -71,6 +71,52 @@ public enum ToolID: String, CaseIterable, Codable, Identifiable, Sendable {
   /// 需要用户填 API Key 的平台（预付费余额 + API 拉取的订阅窗口）
   public var usesAPIKey: Bool { kind != .subscriptionWindows }
 
+  /// 点设置面板里的 ❓ 弹出的分步指南：各家取凭证的路径都不一样，一步一条
+  public var credentialGuide: [String] {
+    switch self {
+    case .codex, .claude: return []
+    case .glm: return [
+      "打开 bigmodel.cn 并登录（用买了 GLM Coding Plan 的那个账号）",
+      "右上角头像 → 「API Keys」（或直接打开下面的链接）",
+      "点「添加新的 API Key」，随便起个名，复制生成的 Key",
+      "回到这里贴进「API Key」栏 → 保存。海外版 z.ai 的 Key 也可以用",
+      "这个 Key 和你配给 Claude Code / Z Code 的是同一把，不用新建也行"
+    ]
+    case .grok: return [
+      "用 Chrome 或 Edge 打开 grok.com，确认已登录 SuperGrok 账号",
+      "按 ⌥⌘I 打开开发者工具，顶部标签点「Application」（藏在 » 里就点开）",
+      "左栏 Storage → Cookies → https://grok.com",
+      "右边列表找 Name 是「sso」的那一行，双击它的 Value，⌘A 全选，⌘C 复制",
+      "回到这里 ⌘V 贴进输入栏 → 保存。Safari 用户：开发 → 显示网页检查器 → 储存空间 → Cookies",
+      "这是你的登录态，只存本机；过期后这里会提示「无效或已过期」，重贴一次即可"
+    ]
+    case .deepseek: return [
+      "打开 platform.deepseek.com 并登录",
+      "左侧菜单「API keys」→「创建 API key」",
+      "Key 只在创建时显示一次，立刻复制",
+      "贴进「API Key」栏 → 保存；「满额基准」填你平时充值的金额（如 100），环才有比例"
+    ]
+    case .moonshot: return [
+      "打开 platform.moonshot.cn 并登录",
+      "左侧「API Key 管理」→「新建」",
+      "复制生成的 sk- 开头的 Key",
+      "贴进「API Key」栏 → 保存；「满额基准」填充值金额，留空则按历史最高余额"
+    ]
+    case .siliconflow: return [
+      "打开 cloud.siliconflow.cn 并登录",
+      "左侧「API 密钥」→「新建 API 密钥」",
+      "点密钥可复制",
+      "贴进「API Key」栏 → 保存；「满额基准」填充值金额"
+    ]
+    case .openrouter: return [
+      "打开 openrouter.ai 并登录",
+      "右上角头像 → Keys →「Create Key」",
+      "建议给 Key 设一个 Credit limit，这样环会按上限画比例；不设就只显示已消耗",
+      "复制 sk-or- 开头的 Key，贴进「API Key」栏 → 保存"
+    ]
+    }
+  }
+
   /// 设置面板凭证输入框的标签：绝大多数是 API Key，SuperGrok 没有公开接口，用的是 grok.com 登录 Cookie
   public var credentialLabel: String {
     self == .grok ? "grok.com 的 sso Cookie" : "API Key"
