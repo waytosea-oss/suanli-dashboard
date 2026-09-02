@@ -31,3 +31,13 @@
 "Claude 账号额度（%@ 周限更紧）" = "Claude account quota (%@ weekly limit is tighter)";
 "周·全部" = "Wk·All";
 "周·%@" = "Wk·%@";
+
+/* ===== 多平台余额抓取（v1.2） ===== */
+"未填写 API Key" = "No API key";
+"API Key 无效或已过期" = "API key invalid or expired";
+"接口限流，稍后重试" = "Rate limited, retry later";
+"请求超时" = "Request timed out";
+"返回内容无法解析" = "Unreadable response";
+"接口返回里没有余额字段" = "No balance field in response";
+"网络错误：%@" = "Network error: %@";
+"接口返回 HTTP %d" = "HTTP %d from API";

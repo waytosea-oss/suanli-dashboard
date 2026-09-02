@@ -1,8 +1,15 @@
 import Foundation
 
+/// 可监控的算力平台。前两个（Codex / Claude）读本机日志 + 官方订阅额度接口；
+/// 其余是按量付费平台，用用户自己的 API Key 读「账户余额」。
+/// 枚举顺序即设置面板「添加平台」菜单里的顺序。
 public enum ToolID: String, CaseIterable, Codable, Identifiable, Sendable {
   case codex
   case claude
+  case deepseek
+  case moonshot
+  case siliconflow
+  case openrouter
 
   public var id: String { rawValue }
 
@@ -10,8 +17,86 @@ public enum ToolID: String, CaseIterable, Codable, Identifiable, Sendable {
     switch self {
     case .codex: "Codex"
     case .claude: "Claude"
+    case .deepseek: "DeepSeek"
+    case .moonshot: "Kimi"
+    case .siliconflow: "SiliconFlow"
+    case .openrouter: "OpenRouter"
     }
   }
+
+  /// 设置面板里的副标题（平台全名）
+  public var vendorName: String {
+    switch self {
+    case .codex: "OpenAI Codex"
+    case .claude: "Claude Code"
+    case .deepseek: "DeepSeek 开放平台"
+    case .moonshot: "Moonshot / Kimi 开放平台"
+    case .siliconflow: "硅基流动 SiliconFlow"
+    case .openrouter: "OpenRouter"
+    }
+  }
+
+  /// 徽章 / Touch Bar 上的单字母章
+  public var letter: String {
+    switch self {
+    case .codex: "C"
+    case .claude: "A"
+    case .deepseek: "D"
+    case .moonshot: "K"
+    case .siliconflow: "S"
+    case .openrouter: "O"
+    }
+  }
+
+  /// 数据形态：订阅额度（百分比窗口）还是预付费余额（金额）
+  public var kind: ProviderKind {
+    switch self {
+    case .codex, .claude: .subscriptionWindows
+    case .deepseek, .moonshot, .siliconflow, .openrouter: .prepaidBalance
+    }
+  }
+
+  /// 只有 Codex / Claude 在本机留有会话日志（token 看板、最近会话、iCloud 同步都依赖它）
+  public var hasLocalLogs: Bool { kind == .subscriptionWindows }
+
+  /// 取色族序号：0 暖(Codex) 1 冷(Claude) 2 青绿 3 紫 4 橙 5 靛
+  public var colorFamily: Int {
+    switch self {
+    case .codex: 0
+    case .claude: 1
+    case .deepseek: 2
+    case .moonshot: 3
+    case .siliconflow: 4
+    case .openrouter: 5
+    }
+  }
+
+  /// 去哪里拿 API Key（设置面板帮助链接）
+  public var apiKeyHelpURL: URL? {
+    switch self {
+    case .codex, .claude: nil
+    case .deepseek: URL(string: "https://platform.deepseek.com/api_keys")
+    case .moonshot: URL(string: "https://platform.moonshot.cn/console/api-keys")
+    case .siliconflow: URL(string: "https://cloud.siliconflow.cn/account/ak")
+    case .openrouter: URL(string: "https://openrouter.ai/settings/keys")
+    }
+  }
+
+  /// 余额接口的币种符号（显示用）
+  public var currencySymbol: String {
+    switch self {
+    case .openrouter: "$"
+    case .deepseek, .moonshot, .siliconflow: "¥"
+    case .codex, .claude: ""
+    }
+  }
+}
+
+public enum ProviderKind: String, Codable, Sendable {
+  /// 订阅制：接口返回 5 时 / 7 天等滚动窗口的已用百分比
+  case subscriptionWindows
+  /// 预付费：接口返回账户余额金额，本工具据此折算「剩余比例」画环
+  case prepaidBalance
 }
 
 public struct LimitWindow: Equatable, Sendable {

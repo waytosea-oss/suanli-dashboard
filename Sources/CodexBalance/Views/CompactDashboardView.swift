@@ -48,23 +48,14 @@ struct CompactRingsView: View {
         .shadow(color: Color.black.opacity(backgroundOpacity * 0.22), radius: 12, x: 0, y: 8)
 
       HStack(spacing: 0) {
-        if store.codexToolEnabled {
-          heroColumn(
-            name: "Codex", tab: .codex, event: store.status?.main,
-            cool: false, unavailable: store.status?.main == nil
-          )
-        }
-        if store.codexToolEnabled && store.claudeToolEnabled {
-          Rectangle()
-            .fill(Color.white.opacity(0.08))
-            .frame(width: 1)
-            .padding(.vertical, isMini ? 16 : 22)
-        }
-        if store.claudeToolEnabled {
-          heroColumn(
-            name: "Claude", tab: .claude, event: store.claudeStatus?.main,
-            cool: true, unavailable: !store.claudeBalanceAvailable
-          )
+        ForEach(Array(store.displayTools.enumerated()), id: \.element.id) { index, tool in
+          if index > 0 {
+            Rectangle()
+              .fill(Color.white.opacity(0.08))
+              .frame(width: 1)
+              .padding(.vertical, isMini ? 16 : 22)
+          }
+          heroColumn(tool)
         }
       }
       .padding(.top, isMini ? 14 : 18)
@@ -83,29 +74,24 @@ struct CompactRingsView: View {
     .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
   }
 
-  private func heroColumn(
-    name: String,
-    tab: DashboardToolTab,
-    event: RateLimitEvent?,
-    cool: Bool,
-    unavailable: Bool
-  ) -> some View {
+  private func heroColumn(_ tool: DisplayTool) -> some View {
     HeroRingGroupView(
-      name: name,
-      event: event,
-      cool: cool,
+      name: tool.name,
+      event: tool.event,
+      family: tool.colorFamily,
       palette: palette,
       mini: isMini,
-      unavailable: unavailable
+      unavailable: tool.unavailable,
+      centerText: tool.centerText
     )
-    .id("\(palette.rawValue)-\(isMini)-\(name)")
+    .id("\(palette.rawValue)-\(isMini)-\(tool.id.rawValue)")
     .frame(maxWidth: .infinity)
     .contentShape(Rectangle())
     .onTapGesture {
-      store.selectedToolTab = tab
+      store.selectedToolTab = .tool(tool.id)
       store.isCompact = false
     }
-    .help(L("展开并查看 %@ 分区", name))
+    .help(tool.errorMessage ?? L("展开并查看 %@ 分区", tool.name))
   }
 
   private var refreshButton: some View {

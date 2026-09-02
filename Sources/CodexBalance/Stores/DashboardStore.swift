@@ -9,20 +9,59 @@ private let dashboardLogger = Logger(
   category: "DashboardStore"
 )
 
-enum DashboardToolTab: String, CaseIterable, Identifiable, Hashable {
-  case codex
-  case claude
+/// 展开面板顶部的分段：每个已启用平台一个 + 「全部」。
+/// rawValue 用于持久化（"codex" / "deepseek" / "all"），老用户存的 "codex"/"claude" 直接兼容。
+enum DashboardToolTab: Hashable, Identifiable {
+  case tool(ToolID)
   case all
+
+  static let codex = DashboardToolTab.tool(.codex)
+  static let claude = DashboardToolTab.tool(.claude)
+
+  init?(rawValue: String) {
+    if rawValue == "all" { self = .all; return }
+    guard let tool = ToolID(rawValue: rawValue) else { return nil }
+    self = .tool(tool)
+  }
+
+  var rawValue: String {
+    switch self {
+    case .tool(let tool): tool.rawValue
+    case .all: "all"
+    }
+  }
 
   var id: String { rawValue }
 
+  var tool: ToolID? {
+    if case .tool(let tool) = self { return tool }
+    return nil
+  }
+
   var title: String {
     switch self {
-    case .codex: "Codex"
-    case .claude: "Claude"
+    case .tool(let tool): tool.displayName
     case .all: "全部".l10n
     }
   }
+}
+
+/// 展示层统一消费的「一个平台」：名字、颜色族、可用状态、以及一个可以直接喂给现有
+/// 环/条/徽章视图的 RateLimitEvent。订阅制平台就是真实事件；预付费平台由余额合成。
+struct DisplayTool: Identifiable, Equatable {
+  var id: ToolID
+  var event: RateLimitEvent?
+  var unavailable: Bool
+  var balance: BalanceMetric?
+  var errorMessage: String?
+
+  var name: String { id.displayName }
+  var letter: String { id.letter }
+  var colorFamily: Int { id.colorFamily }
+  /// 兼容旧视图参数：Claude 及后续平台走「冷色族」逻辑的地方用
+  var cool: Bool { id != .codex }
+  /// 环心显示的文本：订阅制显示百分比；预付费显示金额
+  var centerText: String? { balance?.amountText }
 }
 
 enum AppLanguage: String, CaseIterable, Identifiable, Hashable {
@@ -157,24 +196,118 @@ final class DashboardStore: ObservableObject {
       UserDefaults.standard.set(compactSizeMode.rawValue, forKey: "compactSizeMode")
     }
   }
-  @Published var codexToolEnabled: Bool {
+  /// 已启用的平台，**有序**——顺序就是浮窗 / Touch Bar / 面板里从左到右的顺序。
+  /// 至少保留一个；持久化为 JSON 字符串数组（"enabledProviders"）。
+  @Published var enabledProviders: [ToolID] {
     didSet {
-      if !codexToolEnabled && !claudeToolEnabled {
-        codexToolEnabled = true
+      if enabledProviders.isEmpty {
+        enabledProviders = oldValue.isEmpty ? [.codex] : oldValue
         return
       }
-      UserDefaults.standard.set(codexToolEnabled, forKey: "toolEnabled.codex")
+      if let data = try? JSONEncoder().encode(enabledProviders.map(\.rawValue)) {
+        UserDefaults.standard.set(String(decoding: data, as: UTF8.self), forKey: "enabledProviders")
+      }
+      // 旧键同步写一份，老版本回退时不至于全灭
+      UserDefaults.standard.set(enabledProviders.contains(.codex), forKey: "toolEnabled.codex")
+      UserDefaults.standard.set(enabledProviders.contains(.claude), forKey: "toolEnabled.claude")
       handleToolSelectionChange()
     }
   }
-  @Published var claudeToolEnabled: Bool {
-    didSet {
-      if !codexToolEnabled && !claudeToolEnabled {
-        claudeToolEnabled = true
-        return
+
+  /// 第三方平台的余额快照（DeepSeek / Kimi / SiliconFlow / OpenRouter …）
+  @Published private(set) var providerSnapshots: [ToolID: ProviderSnapshot] = [:]
+
+  /// 兼容旧代码路径：Codex / Claude 的日志抓取与 token 看板仍按这两个开关走
+  var codexToolEnabled: Bool { enabledProviders.contains(.codex) }
+  var claudeToolEnabled: Bool { enabledProviders.contains(.claude) }
+
+  func isEnabled(_ provider: ToolID) -> Bool { enabledProviders.contains(provider) }
+
+  func enable(_ provider: ToolID) {
+    guard !enabledProviders.contains(provider) else { return }
+    enabledProviders.append(provider)
+    if provider.kind == .prepaidBalance { refreshAPIProviders(force: true) }
+  }
+
+  func disable(_ provider: ToolID) {
+    enabledProviders.removeAll { $0 == provider }
+  }
+
+  func move(_ provider: ToolID, direction: Int) {
+    guard let index = enabledProviders.firstIndex(of: provider) else { return }
+    let target = index + direction
+    guard enabledProviders.indices.contains(target) else { return }
+    enabledProviders.swapAt(index, target)
+  }
+
+  /// 还没启用、可以从「添加平台」菜单里挑的
+  var availableProviders: [ToolID] {
+    ToolID.allCases.filter { !enabledProviders.contains($0) }
+  }
+
+  /// 展示层统一入口：按启用顺序给出每个平台的可绘制数据
+  var displayTools: [DisplayTool] {
+    enabledProviders.map { provider in
+      switch provider {
+      case .codex:
+        return DisplayTool(id: .codex, event: status?.main, unavailable: status?.main == nil)
+      case .claude:
+        return DisplayTool(id: .claude, event: claudeStatus?.main, unavailable: !claudeBalanceAvailable)
+      default:
+        let snapshot = providerSnapshots[provider]
+        let event: RateLimitEvent? = snapshot.flatMap { snap in
+          guard snap.balance != nil else { return nil }
+          return RateLimitEvent(
+            timestamp: snap.fetchedAt,
+            sourceName: snap.sourceName,
+            sourcePath: "",
+            limitID: provider.rawValue,
+            limitName: provider.vendorName,
+            windows: snap.resolvedWindows
+          )
+        }
+        return DisplayTool(
+          id: provider,
+          event: event,
+          unavailable: event == nil,
+          balance: snapshot?.balance,
+          errorMessage: snapshot?.errorMessage
+        )
       }
-      UserDefaults.standard.set(claudeToolEnabled, forKey: "toolEnabled.claude")
-      handleToolSelectionChange()
+    }
+  }
+
+  // MARK: 第三方平台 API Key
+
+  func apiKey(for provider: ToolID) -> String {
+    providerKeyStore.entry(for: provider)?.apiKey ?? ""
+  }
+
+  func setAPIKey(_ key: String, for provider: ToolID) {
+    providerKeyStore.setAPIKey(key, for: provider)
+    providerSnapshots[provider] = nil
+    if isEnabled(provider) { refreshAPIProviders(force: true) }
+  }
+
+  func referenceAmount(for provider: ToolID) -> Double? {
+    providerKeyStore.entry(for: provider)?.referenceAmount
+  }
+
+  func setReferenceAmount(_ amount: Double?, for provider: ToolID) {
+    providerKeyStore.setReferenceAmount(amount, for: provider)
+    refreshAPIProviders(force: true)
+  }
+
+  /// 拉取所有已启用的预付费平台余额（各自 4 分钟节流 + 失败退避）
+  func refreshAPIProviders(force: Bool = false) {
+    for provider in enabledProviders where provider.kind == .prepaidBalance {
+      providerBalanceSource.refreshInBackground(provider, force: force) { [weak self] snapshot in
+        Task { @MainActor in
+          guard let self else { return }
+          self.providerSnapshots[provider] = snapshot
+          self.updateTouchBar()
+        }
+      }
     }
   }
   @Published var appLanguage: AppLanguage {
@@ -311,15 +444,11 @@ final class DashboardStore: ObservableObject {
     TouchBarStripController.shared.isSupported
   }
 
-  var enabledToolCount: Int {
-    (codexToolEnabled ? 1 : 0) + (claudeToolEnabled ? 1 : 0)
-  }
+  var enabledToolCount: Int { enabledProviders.count }
 
-  /// 展开面板可用的分段：单工具时只有该工具；双工具时含「全部」
+  /// 展开面板可用的分段：每个已启用平台一个；两个及以上时含「全部」
   var enabledToolTabs: [DashboardToolTab] {
-    var tabs: [DashboardToolTab] = []
-    if codexToolEnabled { tabs.append(.codex) }
-    if claudeToolEnabled { tabs.append(.claude) }
+    var tabs = enabledProviders.map(DashboardToolTab.tool)
     if tabs.count > 1 { tabs.append(.all) }
     return tabs
   }
@@ -330,6 +459,9 @@ final class DashboardStore: ObservableObject {
     }
     if !codexToolEnabled { status = nil }
     if !claudeToolEnabled { claudeStatus = nil }
+    for provider in providerSnapshots.keys where !enabledProviders.contains(provider) {
+      providerSnapshots[provider] = nil
+    }
     updateTouchBar()
     refresh()
   }
@@ -365,6 +497,9 @@ final class DashboardStore: ObservableObject {
   private let fullReader = CodexStatusReader()
   private let claudeFastReader = ClaudeStatusReader()
   private let claudeFullReader = ClaudeStatusReader()
+  /// 第三方平台 API Key（明文文件 0600，不进钥匙串——见 ProviderKeyStore 注释）
+  private let providerKeyStore = ProviderKeyStore()
+  private lazy var providerBalanceSource = APIKeyBalanceSource(keyStore: providerKeyStore)
   private var refreshTimer: Timer?
   private var claudeFastInFlight = false
   private var quickRetryTask: Task<Void, Never>?
@@ -375,16 +510,26 @@ final class DashboardStore: ObservableObject {
     let storedMode = UserDefaults.standard.string(forKey: "compactSizeMode")
     compactSizeMode = storedMode.flatMap(CompactSizeMode.init(rawValue:)) ?? .standard
     let defaults = UserDefaults.standard
-    if defaults.object(forKey: "toolEnabled.codex") == nil && defaults.object(forKey: "toolEnabled.claude") == nil {
+    if let raw = defaults.string(forKey: "enabledProviders"),
+       let names = try? JSONDecoder().decode([String].self, from: Data(raw.utf8)) {
+      // 新版：有序平台列表
+      let decoded = names.compactMap(ToolID.init(rawValue:))
+      enabledProviders = decoded.isEmpty ? [.codex] : decoded
+    } else if defaults.object(forKey: "toolEnabled.codex") != nil || defaults.object(forKey: "toolEnabled.claude") != nil {
+      // 老用户：从两个布尔开关迁移
+      var migrated: [ToolID] = []
+      if defaults.object(forKey: "toolEnabled.codex") as? Bool ?? true { migrated.append(.codex) }
+      if defaults.object(forKey: "toolEnabled.claude") as? Bool ?? true { migrated.append(.claude) }
+      enabledProviders = migrated.isEmpty ? [.codex] : migrated
+    } else {
+      // 首次启动：按本机装了哪个自动探测；都没装或都装了 → 全开
       let home = FileManager.default.homeDirectoryForCurrentUser
       let hasCodex = FileManager.default.fileExists(atPath: home.appendingPathComponent(".codex").path)
       let hasClaude = FileManager.default.fileExists(atPath: home.appendingPathComponent(".claude").path)
-      // 都没装或都装了 → 全开；只装一个 → 只开那个
-      codexToolEnabled = hasCodex || !hasClaude
-      claudeToolEnabled = hasClaude || !hasCodex
-    } else {
-      codexToolEnabled = defaults.object(forKey: "toolEnabled.codex") as? Bool ?? true
-      claudeToolEnabled = defaults.object(forKey: "toolEnabled.claude") as? Bool ?? true
+      var detected: [ToolID] = []
+      if hasCodex || !hasClaude { detected.append(.codex) }
+      if hasClaude || !hasCodex { detected.append(.claude) }
+      enabledProviders = detected
     }
     let storedLanguages = UserDefaults.standard.array(forKey: "AppleLanguages") as? [String]
     appLanguage = storedLanguages?.first.flatMap(AppLanguage.init(rawValue:)) ?? .system
@@ -482,6 +627,32 @@ final class DashboardStore: ObservableObject {
     var root: [String: Any] = ["updatedAt": Date().timeIntervalSince1970]
     if let codex = toolJSON(status?.main, stats: status?.tokenStats, enabled: codexToolEnabled) { root["codex"] = codex }
     if let claude = toolJSON(claudeStatus?.main, stats: claudeStatus?.tokenStats, enabled: claudeToolEnabled) { root["claude"] = claude }
+    // 通用结构：所有已启用平台按顺序排一遍（含上面两个），伴侣设备只认这一份即可。
+    // 预付费平台多给 amount / currency / reference 三个字段。
+    let providers: [[String: Any]] = displayTools.map { tool in
+      var item: [String: Any] = [
+        "id": tool.id.rawValue,
+        "name": tool.name,
+        "letter": tool.letter,
+        "kind": tool.id.kind.rawValue,
+        "available": !tool.unavailable
+      ]
+      if let event = tool.event {
+        item["windows"] = event.resolvedWindows.map { labeled -> [String: Any] in
+          var w: [String: Any] = ["label": labeled.label, "pct": labeled.window.remainingPercent, "hourScale": labeled.isHourScale]
+          if let resets = labeled.window.resetsAt { w["reset"] = resets.timeIntervalSince1970 }
+          return w
+        }
+      }
+      if let balance = tool.balance {
+        item["amount"] = balance.amount
+        item["currency"] = balance.currencySymbol
+        if let reference = balance.reference { item["reference"] = reference }
+      }
+      if let error = tool.errorMessage { item["error"] = error }
+      return item
+    }
+    root["providers"] = providers
     guard let data = try? JSONSerialization.data(withJSONObject: root) else { return }
     let dir = FileManager.default.homeDirectoryForCurrentUser
       .appendingPathComponent("Library/Application Support/CodexBalanceDashboard")
@@ -493,27 +664,27 @@ final class DashboardStore: ObservableObject {
   private func updateTouchBar() {
     writeLiveBalanceFile()
     guard touchBarEnabled else { return }
-    func toolData(_ event: RateLimitEvent?, letter: String, cool: Bool) -> TouchBarStripController.ToolData {
+    let tools: [TouchBarStripController.ToolData] = displayTools.map { tool in
+      let event = tool.event
       let windows = (event?.resolvedWindows ?? []).enumerated().map { index, labeled in
         TouchBarStripController.TBWindow(
           label: labeled.label,
-          percent: labeled.window.remainingPercent,
+          percent: tool.unavailable ? nil : labeled.window.remainingPercent,
           reset: labeled.window.resetsAt,
           hourScale: labeled.isHourScale,
-          color: NSColor(palette.windowColor(cool: cool, index: index))
+          color: NSColor(palette.windowColor(family: tool.colorFamily, index: index)),
+          // 预付费平台：数字位置显示金额而不是百分比
+          valueText: tool.centerText
         )
       }
       let bottleneckIndex = event?.bottleneckWindow.flatMap { bottleneck in
         event?.resolvedWindows.firstIndex { $0.label == bottleneck.label }
       } ?? 0
       return TouchBarStripController.ToolData(
-        letter: letter, windows: windows, bottleneckIndex: bottleneckIndex
+        letter: tool.letter, windows: windows, bottleneckIndex: bottleneckIndex
       )
     }
-    TouchBarStripController.shared.update(
-      codex: codexToolEnabled ? toolData(status?.main, letter: "C", cool: false) : nil,
-      claude: claudeToolEnabled ? toolData(claudeStatus?.main, letter: "A", cool: true) : nil
-    )
+    TouchBarStripController.shared.update(tools: tools)
     pushSessionsToTouchBar()
   }
 
@@ -590,6 +761,7 @@ final class DashboardStore: ObservableObject {
 
   func refresh() {
     guard !isLoading else { return }
+    refreshAPIProviders()
     guard codexToolEnabled else {
       scheduleFullRefreshIfNeeded()
       refreshClaudeFast()

@@ -15,18 +15,11 @@ struct CompactBarsView: View {
       compactBackground(cornerRadius: 10, palette: palette, opacity: backgroundOpacity)
 
       VStack(spacing: quad ? 8 : 4) {
-        if store.codexToolEnabled {
+        ForEach(store.displayTools) { tool in
           ToolBarBlock(
-            letter: "C", event: store.status?.main, cool: false,
+            letter: tool.letter, event: tool.event, family: tool.colorFamily,
             palette: palette, quad: quad,
-            unavailable: store.status?.main == nil
-          )
-        }
-        if store.claudeToolEnabled {
-          ToolBarBlock(
-            letter: "A", event: store.claudeStatus?.main, cool: true,
-            palette: palette, quad: quad,
-            unavailable: !store.claudeBalanceAvailable
+            unavailable: tool.unavailable, valueText: tool.centerText
           )
         }
       }
@@ -74,23 +67,16 @@ struct CompactBadgeView: View {
       compactBackground(cornerRadius: 13, palette: palette, opacity: backgroundOpacity)
 
       HStack(spacing: 5) {
-        if store.codexToolEnabled {
+        ForEach(Array(store.displayTools.enumerated()), id: \.element.id) { index, tool in
+          if index > 0 {
+            Rectangle()
+              .fill(Color.white.opacity(0.12))
+              .frame(width: 1, height: 12)
+          }
           BadgeUnit(
-            letter: "C", event: store.status?.main, cool: false,
+            letter: tool.letter, event: tool.event, family: tool.colorFamily,
             palette: palette, quad: quad,
-            unavailable: store.status?.main == nil
-          )
-        }
-        if store.codexToolEnabled && store.claudeToolEnabled {
-          Rectangle()
-            .fill(Color.white.opacity(0.12))
-            .frame(width: 1, height: 12)
-        }
-        if store.claudeToolEnabled {
-          BadgeUnit(
-            letter: "A", event: store.claudeStatus?.main, cool: true,
-            palette: palette, quad: quad,
-            unavailable: !store.claudeBalanceAvailable
+            unavailable: tool.unavailable, valueText: tool.centerText
           )
         }
       }
@@ -103,16 +89,19 @@ struct CompactBadgeView: View {
   }
 
   private var badgeHelpText: String {
-    func describe(_ name: String, _ event: RateLimitEvent?, unavailable: Bool) -> String {
-      guard !unavailable, let event else { return L("%@: 暂无数据", name) }
+    func describe(_ tool: DisplayTool) -> String {
+      if let error = tool.errorMessage, tool.unavailable { return "\(tool.name): \(error)" }
+      guard !tool.unavailable, let event = tool.event else { return L("%@: 暂无数据", tool.name) }
+      if let balance = tool.balance {
+        let ratio = balance.remainingPercent.map { " · " + BalanceFormatters.percent($0) } ?? ""
+        return "\(tool.name): \(balance.amountText)\(ratio)"
+      }
       let parts = event.resolvedWindows.map {
         "\($0.label) \(BalanceFormatters.percent($0.window.remainingPercent))"
       }
-      return "\(name): \(parts.joined(separator: " · "))"
+      return "\(tool.name): \(parts.joined(separator: " · "))"
     }
-    return describe("Codex", store.status?.main, unavailable: store.status?.main == nil)
-      + "\n" + describe("Claude", store.claudeStatus?.main, unavailable: !store.claudeBalanceAvailable)
-      + "\n" + "点击展开完整面板".l10n
+    return (store.displayTools.map(describe) + ["点击展开完整面板".l10n]).joined(separator: "\n")
   }
 }
 
@@ -120,10 +109,12 @@ struct CompactBadgeView: View {
 private struct BadgeUnit: View {
   var letter: String
   var event: RateLimitEvent?
-  var cool: Bool
+  var family: Int
   var palette: DashboardPalette
   var quad: Bool
   var unavailable: Bool
+  /// 预付费平台：大数字位置显示金额
+  var valueText: String? = nil
 
   private var windows: [LabeledWindow] { event?.resolvedWindows ?? [] }
   private var bottleneck: LabeledWindow? { event?.bottleneckWindow }
@@ -133,7 +124,7 @@ private struct BadgeUnit: View {
   }
 
   private func color(_ index: Int) -> Color {
-    unavailable ? Color.white.opacity(0.25) : palette.windowColor(cool: cool, index: index)
+    unavailable ? Color.white.opacity(0.25) : palette.windowColor(family: family, index: index)
   }
 
   /// 除瓶颈外的其余窗口（按紧张度排序）
@@ -155,9 +146,11 @@ private struct BadgeUnit: View {
             .foregroundStyle(unavailable ? DashboardColors.subtleText : Color.black.opacity(0.75))
         )
 
-      Text(unavailable ? "--" : "\(Int((bottleneck?.window.remainingPercent ?? 0).rounded()))")
+      Text(unavailable ? "--" : (valueText ?? "\(Int((bottleneck?.window.remainingPercent ?? 0).rounded()))"))
         .font(.system(size: quad ? 12.5 : 11.5, weight: .heavy, design: .rounded))
         .monospacedDigit()
+        .lineLimit(1)
+        .minimumScaleFactor(0.7)
         .foregroundStyle(unavailable ? DashboardColors.subtleText : color(bottleneckIndex))
         .frame(minWidth: 19, alignment: .trailing)
 
@@ -195,10 +188,12 @@ private struct BadgeUnit: View {
 private struct ToolBarBlock: View {
   var letter: String
   var event: RateLimitEvent?
-  var cool: Bool
+  var family: Int
   var palette: DashboardPalette
   var quad: Bool
   var unavailable: Bool
+  /// 预付费平台：百分比位置显示金额
+  var valueText: String? = nil
 
   private var windows: [LabeledWindow] { event?.resolvedWindows ?? [] }
   private var bottleneck: LabeledWindow? { event?.bottleneckWindow }
@@ -208,7 +203,7 @@ private struct ToolBarBlock: View {
   }
 
   private func color(_ index: Int) -> Color {
-    unavailable ? Color.white.opacity(0.25) : palette.windowColor(cool: cool, index: index)
+    unavailable ? Color.white.opacity(0.25) : palette.windowColor(family: family, index: index)
   }
 
   var body: some View {
@@ -236,11 +231,11 @@ private struct ToolBarBlock: View {
         .frame(height: 7)
 
         VStack(alignment: .trailing, spacing: 0) {
-          Text(unavailable ? "--" : BalanceFormatters.percent(bottleneck?.window.remainingPercent))
+          Text(unavailable ? "--" : (valueText ?? BalanceFormatters.percent(bottleneck?.window.remainingPercent)))
             .font(.system(size: 11, weight: .heavy, design: .rounded))
             .monospacedDigit()
             .foregroundStyle(unavailable ? DashboardColors.subtleText : color(bottleneckIndex))
-          Text(unavailable ? "暂无".l10n : "\(bottleneck?.label ?? "--") \(BalanceFormatters.resetCountdownShort(bottleneck?.window.resetsAt, mode: (bottleneck?.isHourScale ?? false) ? .hours : .days))")
+          Text(unavailable ? "暂无".l10n : (valueText != nil ? "账户余额".l10n : "\(bottleneck?.label ?? "--") \(BalanceFormatters.resetCountdownShort(bottleneck?.window.resetsAt, mode: (bottleneck?.isHourScale ?? false) ? .hours : .days))"))
             .font(.system(size: 7.5, weight: .bold, design: .rounded))
             .monospacedDigit()
             .foregroundStyle(DashboardColors.subtleText)

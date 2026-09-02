@@ -167,6 +167,7 @@ enum SessionAppLauncher {
     switch tool {
     case .claude: bundleIDs = ["com.anthropic.claudefordesktop"]
     case .codex: bundleIDs = ["com.openai.codex"]
+    default: return   // 按量付费平台没有本机 App，也不会出现在会话条目里
     }
     for bundleID in bundleIDs {
       if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {

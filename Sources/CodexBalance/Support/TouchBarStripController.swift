@@ -19,6 +19,8 @@ final class TouchBarStripController: NSObject, NSTouchBarDelegate {
     var reset: Date?
     var hourScale: Bool
     var color: NSColor
+    /// 预付费平台：数字位置显示金额（"¥12.30"）而不是百分比；nil 走百分比
+    var valueText: String? = nil
   }
 
   struct ToolData {
@@ -110,11 +112,11 @@ final class TouchBarStripController: NSObject, NSTouchBarDelegate {
     panelView.needsDisplay = true
   }
 
-  func update(codex: ToolData?, claude: ToolData?) {
+  /// 按启用顺序传入任意个平台；空数组 = 全部关闭
+  func update(tools: [ToolData]) {
     guard installed else { return }
-    updateTrayText(tools: [codex, claude].compactMap { $0 })
-    panelView.codex = codex
-    panelView.claude = claude
+    updateTrayText(tools: tools)
+    panelView.tools = tools
     panelView.invalidateIntrinsicContentSize()
     panelView.needsDisplay = true
   }
@@ -138,7 +140,8 @@ final class TouchBarStripController: NSObject, NSTouchBarDelegate {
         .foregroundColor: effective.withAlphaComponent(0.85),
         .baselineOffset: 2.5
       ]))
-      text.append(NSAttributedString(string: percent.map { "\(Int($0.rounded()))" } ?? "--", attributes: [
+      let value = tool.bottleneck?.valueText ?? (percent.map { "\(Int($0.rounded()))" } ?? "--")
+      text.append(NSAttributedString(string: value, attributes: [
         .font: NSFont.monospacedDigitSystemFont(ofSize: 15, weight: .heavy),
         .foregroundColor: effective
       ]))
@@ -254,8 +257,8 @@ final class TouchBarStripController: NSObject, NSTouchBarDelegate {
 /// 全宽 Touch Bar 余额面板：两组（Codex/Claude），每组 = 字母章 + 5时/7天两条进度条（含百分比+倒计时）
 @MainActor
 private final class BalanceStripView: NSView {
-  var codex: TouchBarStripController.ToolData?
-  var claude: TouchBarStripController.ToolData?
+  /// 已启用的平台，按显示顺序
+  var tools: [TouchBarStripController.ToolData] = []
   var style: TouchBarPanelStyle = .barsQuad
   var showsPercentSign = true
   var showsWindowTags = true
@@ -316,8 +319,8 @@ private final class BalanceStripView: NSView {
   }
 
   override var intrinsicContentSize: NSSize {
-    let count = max(1, [codex, claude].compactMap { $0 }.count)
-    let maxWindows = CGFloat(max(codex?.windows.count ?? 0, claude?.windows.count ?? 0, 1))
+    let count = max(1, tools.count)
+    let maxWindows = CGFloat(max(tools.map(\.windows.count).max() ?? 0, 1))
     var perTool: CGFloat
     switch style {
     // 全数字：每个窗口都是等大数字（22pt 重体，含 % 约 52pt）+ 窗口间距 10pt；
@@ -359,14 +362,13 @@ private final class BalanceStripView: NSView {
 
     sessionHitRects = []
     var x: CGFloat = 52 // 最左侧是 ⤢ 按钮的固定区域
-    if let codex {
-      x = drawTool(codex, startX: x)
-      x += 12
-      drawSeparator(at: x)
-      x += 12
-    }
-    if let claude {
-      x = drawTool(claude, startX: x)
+    for (index, tool) in tools.enumerated() {
+      if index > 0 {
+        x += 12
+        drawSeparator(at: x)
+        x += 12
+      }
+      x = drawTool(tool, startX: x)
     }
     if !sessions.isEmpty {
       x += 12
@@ -487,7 +489,8 @@ private final class BalanceStripView: NSView {
       let widthTop = drawWindowRow(
         label: bottleneck?.label ?? "--", percent: bottleneck?.percent,
         reset: bottleneck?.reset, mode: (bottleneck?.hourScale ?? false) ? .hours : .days,
-        color: heroColor, startX: x, centerY: topY, barWidth: barWidth, showsCountdown: !isTight
+        color: heroColor, startX: x, centerY: topY, barWidth: barWidth, showsCountdown: !isTight,
+        valueText: bottleneck?.valueText
       )
       var sx = x
       for (index, window) in tool.windows.enumerated() {
@@ -520,7 +523,8 @@ private final class BalanceStripView: NSView {
         label: bottleneck?.label ?? "--", percent: bottleneck?.percent,
         reset: bottleneck?.reset, mode: (bottleneck?.hourScale ?? false) ? .hours : .days,
         color: heroColor, startX: x, centerY: midY, barWidth: isTight ? 72 : 128,
-        percentFontSize: 22, percentAdvance: 60, showsCountdown: !isTight
+        percentFontSize: 22, percentAdvance: 60, showsCountdown: !isTight,
+        valueText: bottleneck?.valueText
       )
       return x + width
     case .numbersAll:
@@ -535,7 +539,7 @@ private final class BalanceStripView: NSView {
           cx += drawVerticalLabel(shortLabel(window), at: cx, centerY: midY,
                                   color: NSColor.white.withAlphaComponent(0.55)) + 3
         }
-        let text = window.percent.map { "\(Int($0.rounded()))\(percentSuffix)" } ?? "--"
+        let text = valueString(window, suffix: percentSuffix)
         let numberWidth = drawBigNumber(text, at: cx, centerY: midY + 2, color: effective)
         drawResetUnderline(
           x: cx, width: numberWidth, reset: window.reset,
@@ -551,7 +555,7 @@ private final class BalanceStripView: NSView {
       if showsWindowTags, let label = bottleneck?.label {
         cx += drawVerticalLabel(label, at: cx, centerY: midY, color: NSColor.white.withAlphaComponent(0.55)) + 3
       }
-      let text = bottleneck?.percent.map { "\(Int($0.rounded()))\(percentSuffix)" } ?? "--"
+      let text = valueString(bottleneck, suffix: percentSuffix)
       let numberWidth = drawBigNumber(text, at: cx, centerY: midY + 2, color: effective)
       drawResetUnderline(
         x: cx, width: numberWidth, reset: bottleneck?.reset,
@@ -577,7 +581,7 @@ private final class BalanceStripView: NSView {
       if showsWindowTags, let label = bottleneck?.label {
         cx += drawVerticalLabel(label, at: cx, centerY: midY, color: NSColor.white.withAlphaComponent(0.55)) + 3
       }
-      let text = bottleneck?.percent.map { "\(Int($0.rounded()))\(percentSuffix)" } ?? "--"
+      let text = valueString(bottleneck, suffix: percentSuffix)
       let numberWidth = drawBigNumber(text, at: cx, centerY: midY + 2, color: effective)
       drawResetUnderline(
         x: cx, width: numberWidth, reset: bottleneck?.reset,
@@ -619,7 +623,8 @@ private final class BalanceStripView: NSView {
     barWidth: CGFloat = 116,
     percentFontSize: CGFloat = 11,
     percentAdvance: CGFloat = 36,
-    showsCountdown: Bool = true
+    showsCountdown: Bool = true,
+    valueText: String? = nil
   ) -> CGFloat {
     var x = startX
     let effective = (percent ?? 100) < 20 ? NSColor.systemRed : color
@@ -639,7 +644,7 @@ private final class BalanceStripView: NSView {
     }
     x += barWidth + 6
 
-    let percentText = percent.map { "\(Int($0.rounded()))\(showsPercentSign ? "%" : "")" } ?? "--"
+    let percentText = valueText ?? (percent.map { "\(Int($0.rounded()))\(showsPercentSign ? "%" : "")" } ?? "--")
     let percentString = NSAttributedString(
       string: percentText,
       attributes: [.font: NSFont.monospacedDigitSystemFont(ofSize: percentFontSize, weight: .heavy), .foregroundColor: effective]
@@ -705,7 +710,14 @@ private final class BalanceStripView: NSView {
   ///   5 小时窗口      → 5时
   ///   模型专属周窗口  → 模型名前 2 字（如 Fable → Fa），靠颜色进一步区分
   ///   账号级周窗口    → 7天（和 Codex 的写法保持一致）
+  /// 数字位置的文本：预付费平台显示金额，其余显示百分比
+  private func valueString(_ w: TouchBarStripController.TBWindow?, suffix: String) -> String {
+    if let text = w?.valueText { return text }
+    return w?.percent.map { "\(Int($0.rounded()))\(suffix)" } ?? "--"
+  }
+
   private func shortLabel(_ w: TouchBarStripController.TBWindow) -> String {
+    if w.valueText != nil { return "余额" }   // 预付费平台：金额本身就是标签，这里只标性质
     if w.hourScale { return "5时" }
     if let range = w.label.range(of: "·"), !w.label.contains("全部") {
       let model = String(w.label[range.upperBound...])

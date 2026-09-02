@@ -149,3 +149,32 @@
 "尝试阻止 Touch Bar 息屏；能否成功取决于机型与系统版本，新系统多半仍会息屏。会同时阻止主屏休眠，用电池注意续航" = "Attempts to keep the Touch Bar lit — success depends on your Mac and macOS version; newer systems usually still dim it. Also prevents the main display from sleeping, so mind battery.";
 "尽力保持 Touch Bar 常亮（系统底层控制，不保证生效）" = "Best-effort keep-awake (controlled by the system, not guaranteed)";
 "%@ 余额" = "%@ balance";
+
+/* ===== 多平台（v1.2） ===== */
+"监控平台" = "Platforms";
+"添加平台" = "Add platform";
+"全部平台都已添加" = "All platforms added";
+"已启用 %d 个平台" = "%d platforms enabled";
+"选几个就显示几个环 / 条 / 数字，顺序就是显示顺序；至少保留一个。Codex 与 Claude 读本机登录状态，其余平台填你自己的 API Key（只存本机，不上传）。" = "Pick any number — each shows as a ring / bar / number, in this order; keep at least one. Codex and Claude use your local login; other platforms need your own API key (stored locally only, never uploaded).";
+"移除该平台" = "Remove platform";
+"API Key" = "API Key";
+"保存" = "Save";
+"满额基准" = "Full scale";
+"画环用的「满额」金额，例如你平时充 100 就填 100；留空则按历史最高余额" = "Amount that counts as a full ring — e.g. 100 if you usually top up 100. Leave empty to use the highest balance seen.";
+"去平台控制台获取 API Key" = "Get an API key from the platform console";
+"已连接" = "Connected";
+"暂无数据 · 在设置里填入 API Key" = "No data · enter an API key in Settings";
+"余额" = "Balance";
+"账户余额" = "Account balance";
+"可用余额" = "Available";
+"平台赠送" = "Granted";
+"自己充值" = "Topped up";
+"已消耗" = "Used";
+"还没有基准：环暂不画比例。用几天后自动按历史最高余额画，或在设置里手填。" = "No full-scale reference yet, so the ring shows no ratio. After a few days it uses the highest balance seen, or set one in Settings.";
+"约为满额基准的 %@" = "≈ %@ of full scale";
+"无基准，仅显示金额" = "No reference · amount only";
+"计费方式" = "Billing";
+"按量" = "Pay-as-you-go";
+"用多少扣多少，不按时间窗口重置" = "Charged per use · no time-window reset";
+"按量计费 · 余额" = "pay-as-you-go · balance";
+"各平台口径不同，不相加" = "Different platforms, different units — not summed";

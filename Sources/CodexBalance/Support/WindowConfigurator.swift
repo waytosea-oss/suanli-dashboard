@@ -7,39 +7,37 @@ enum WindowConfigurator {
   static let miniCompactSize = NSSize(width: 236, height: 148)
   static let expandedSize = NSSize(width: 620, height: 820)
 
+  /// 折叠浮窗尺寸：按「平台数」线性推算，1~6 个平台版式不变。
+  /// 双环/徽章横向排列 → 宽度随数量增长；长条竖向堆叠 → 高度随数量增长。
   static func compactSize(
     for mode: CompactSizeMode,
     style: CompactStyle = .rings,
     toolCount: Int = 2
   ) -> NSSize {
-    let dual = toolCount >= 2
+    let n = CGFloat(max(1, min(6, toolCount)))
+    let mini = mode == .mini
     switch style {
     case .rings:
-      // 主环+卫星版：组 126/96pt 高 + 名称行与内边距
-      if mode == .mini {
-        return dual ? NSSize(width: 212, height: 128) : NSSize(width: 120, height: 128)
-      }
-      return dual ? NSSize(width: 284, height: 164) : NSSize(width: 158, height: 164)
+      // 每组主环+卫星 = 单组宽 + 组间分隔线；高度固定
+      let unit: CGFloat = mini ? 92 : 126
+      let padding: CGFloat = mini ? 28 : 32
+      return NSSize(width: unit * n + padding, height: mini ? 128 : 164)
     case .bars:
-      if mode == .mini {
-        return NSSize(width: 212, height: dual ? 62 : 42)
-      }
-      return NSSize(width: 248, height: dual ? 74 : 50)
+      let row: CGFloat = mini ? 20 : 24
+      let padding: CGFloat = mini ? 22 : 26
+      return NSSize(width: mini ? 212 : 248, height: row * n + padding)
     case .barsQuad:
-      if mode == .mini {
-        return NSSize(width: 212, height: dual ? 104 : 62)
-      }
-      return NSSize(width: 248, height: dual ? 122 : 74)
+      let row: CGFloat = mini ? 42 : 48
+      let padding: CGFloat = mini ? 20 : 26
+      return NSSize(width: mini ? 212 : 248, height: row * n + padding)
     case .badge:
-      if mode == .mini {
-        return NSSize(width: dual ? 138 : 80, height: 34)
-      }
-      return NSSize(width: dual ? 158 : 92, height: 40)
+      let unit: CGFloat = mini ? 58 : 66
+      let padding: CGFloat = mini ? 22 : 26
+      return NSSize(width: unit * n + padding, height: mini ? 34 : 40)
     case .badgeQuad:
-      if mode == .mini {
-        return NSSize(width: dual ? 208 : 118, height: 34)
-      }
-      return NSSize(width: dual ? 238 : 134, height: 40)
+      let unit: CGFloat = mini ? 90 : 104
+      let padding: CGFloat = mini ? 28 : 30
+      return NSSize(width: unit * n + padding, height: mini ? 34 : 40)
     }
   }
 

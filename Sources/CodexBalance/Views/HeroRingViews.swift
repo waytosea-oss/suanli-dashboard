@@ -6,10 +6,12 @@ import SwiftUI
 struct HeroRingGroupView: View {
   var name: String
   var event: RateLimitEvent?
-  var cool: Bool                    // 冷族(Claude)/暖族(Codex)取色
+  var family: Int                   // 平台色族（ToolID.colorFamily）
   var palette: DashboardPalette
   var mini = false
   var unavailable = false
+  /// 预付费平台：环心显示金额（"¥12.30"）而不是百分比
+  var centerText: String? = nil
 
   private var windows: [LabeledWindow] { event?.resolvedWindows ?? [] }
   private var bottleneck: LabeledWindow? { event?.bottleneckWindow }
@@ -22,7 +24,13 @@ struct HeroRingGroupView: View {
   private var ringWidth: CGFloat { mini ? 7 : 9 }
 
   private func color(_ index: Int) -> Color {
-    unavailable ? Color.white.opacity(0.25) : palette.windowColor(cool: cool, index: index)
+    unavailable ? Color.white.opacity(0.25) : palette.windowColor(family: family, index: index)
+  }
+
+  private var centerValue: String {
+    if unavailable { return "--" }
+    if let centerText { return centerText }
+    return BalanceFormatters.percent(bottleneck?.window.remainingPercent)
   }
 
   var body: some View {
@@ -41,16 +49,18 @@ struct HeroRingGroupView: View {
           .shadow(color: color(bottleneckIndex).opacity(0.30), radius: 8)
 
         VStack(spacing: mini ? 0 : 1) {
-          Text(unavailable ? "--" : BalanceFormatters.percent(bottleneck?.window.remainingPercent))
+          Text(centerValue)
             .font(.system(size: mini ? 18 : 22, weight: .heavy, design: .rounded))
             .foregroundStyle(unavailable ? DashboardColors.subtleText : Color.white.opacity(0.92))
             .monospacedDigit()
-          Text(unavailable ? "暂无数据".l10n : (bottleneck?.label ?? "--"))
+            .lineLimit(1)
+            .minimumScaleFactor(0.6)
+          Text(unavailable ? "暂无数据".l10n : (centerText != nil ? "余额".l10n : (bottleneck?.label ?? "--")))
             .font(.system(size: mini ? 8 : 9, weight: .semibold))
             .foregroundStyle(color(bottleneckIndex))
             .lineLimit(1)
             .minimumScaleFactor(0.7)
-          if !mini, !unavailable, let bottleneck {
+          if !mini, !unavailable, centerText == nil, let bottleneck {
             Text(BalanceFormatters.resetCountdownShort(
               bottleneck.window.resetsAt,
               mode: bottleneck.isHourScale ? .hours : .days
@@ -68,7 +78,7 @@ struct HeroRingGroupView: View {
       SatelliteCapsuleRow(
         windows: windows,
         bottleneckIndex: bottleneckIndex,
-        cool: cool,
+        family: family,
         palette: palette,
         mini: mini,
         unavailable: unavailable
@@ -82,7 +92,7 @@ struct HeroRingGroupView: View {
 struct SatelliteCapsuleRow: View {
   var windows: [LabeledWindow]
   var bottleneckIndex: Int
-  var cool: Bool
+  var family: Int
   var palette: DashboardPalette
   var mini = false
   var unavailable = false
@@ -98,7 +108,7 @@ struct SatelliteCapsuleRow: View {
   var body: some View {
     HStack(spacing: mini ? 5 : 6) {
       ForEach(Array(windows.enumerated()), id: \.offset) { index, labeled in
-        let tint = unavailable ? Color.white.opacity(0.25) : palette.windowColor(cool: cool, index: index)
+        let tint = unavailable ? Color.white.opacity(0.25) : palette.windowColor(family: family, index: index)
         ZStack(alignment: .leading) {
           Capsule().fill(Color.white.opacity(0.12))
           Capsule()
@@ -124,7 +134,7 @@ struct SatelliteCapsuleRow: View {
 /// 展开面板用：主环右侧的「窗口速览」竖列——全部 N 窗口，每行 label + 微条 + % + 倒计时
 struct WindowQuickListView: View {
   var event: RateLimitEvent?
-  var cool: Bool
+  var family: Int
   var palette: DashboardPalette
   var unavailable = false
 
@@ -134,7 +144,7 @@ struct WindowQuickListView: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
       ForEach(Array(windows.enumerated()), id: \.offset) { index, labeled in
-        let tint = unavailable ? Color.white.opacity(0.25) : palette.windowColor(cool: cool, index: index)
+        let tint = unavailable ? Color.white.opacity(0.25) : palette.windowColor(family: family, index: index)
         let isBottleneck = labeled.label == bottleneckLabel
         VStack(alignment: .leading, spacing: 3) {
           HStack(spacing: 6) {
@@ -179,9 +189,11 @@ struct WindowQuickListView: View {
 /// 展开态大主环：∅~180、环宽 14，环心大号数字 + label + 倒计时，下方卫星胶囊行
 struct ExpandedHeroRing: View {
   var event: RateLimitEvent?
-  var cool: Bool
+  var family: Int
   var palette: DashboardPalette
   var unavailable = false
+  /// 预付费平台：环心显示金额
+  var centerText: String? = nil
 
   private var windows: [LabeledWindow] { event?.resolvedWindows ?? [] }
   private var bottleneck: LabeledWindow? { event?.bottleneckWindow }
@@ -191,7 +203,13 @@ struct ExpandedHeroRing: View {
   }
 
   private func color(_ index: Int) -> Color {
-    unavailable ? Color.white.opacity(0.25) : palette.windowColor(cool: cool, index: index)
+    unavailable ? Color.white.opacity(0.25) : palette.windowColor(family: family, index: index)
+  }
+
+  private var centerValue: String {
+    if unavailable { return "--" }
+    if let centerText { return centerText }
+    return BalanceFormatters.percent(bottleneck?.window.remainingPercent)
   }
 
   var body: some View {
@@ -206,14 +224,16 @@ struct ExpandedHeroRing: View {
           .shadow(color: color(bottleneckIndex).opacity(0.32), radius: 10)
 
         VStack(spacing: 2) {
-          Text(unavailable ? "--" : BalanceFormatters.percent(bottleneck?.window.remainingPercent))
+          Text(centerValue)
             .font(.system(size: 40, weight: .heavy, design: .rounded))
             .foregroundStyle(unavailable ? DashboardColors.subtleText : Color.white.opacity(0.92))
             .monospacedDigit()
-          Text(unavailable ? "暂无数据".l10n : (bottleneck?.label ?? "--"))
+            .lineLimit(1)
+            .minimumScaleFactor(0.6)
+          Text(unavailable ? "暂无数据".l10n : (centerText != nil ? "账户余额".l10n : (bottleneck?.label ?? "--")))
             .font(.system(size: 13, weight: .heavy))
             .foregroundStyle(color(bottleneckIndex))
-          if !unavailable, let bottleneck {
+          if !unavailable, centerText == nil, let bottleneck {
             Text(BalanceFormatters.resetCountdown(
               bottleneck.window.resetsAt,
               mode: bottleneck.isHourScale ? .hours : .days
@@ -228,7 +248,7 @@ struct ExpandedHeroRing: View {
 
       SatelliteCapsuleRow(
         windows: windows, bottleneckIndex: bottleneckIndex,
-        cool: cool, palette: palette, unavailable: unavailable
+        family: family, palette: palette, unavailable: unavailable
       )
       .frame(height: 12)
     }

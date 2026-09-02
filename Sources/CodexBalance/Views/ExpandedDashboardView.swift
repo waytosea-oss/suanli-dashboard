@@ -4,6 +4,9 @@ import SwiftUI
 struct ExpandedDashboardView: View {
   @EnvironmentObject private var store: DashboardStore
   @State private var showSettings = false
+  /// 设置面板里正在编辑的 API Key / 满额基准草稿（回车或失焦才写入）
+  @State private var keyDrafts: [ToolID: String] = [:]
+  @State private var referenceDrafts: [ToolID: String] = [:]
   private var palette: DashboardPalette { store.palette }
 
   var body: some View {
@@ -36,12 +39,12 @@ struct ExpandedDashboardView: View {
               .transition(.opacity.combined(with: .move(edge: .top)))
           }
           switch store.selectedToolTab {
-          case .codex:
+          case .tool(.codex):
             gaugePanel
             overviewCards
             TokenStatsView(stats: store.tokenStats, palette: palette)
             recentEvents
-          case .claude:
+          case .tool(.claude):
             claudeGaugePanel
             claudeOverviewCards
             TokenStatsView(
@@ -53,6 +56,12 @@ struct ExpandedDashboardView: View {
               boardCaption: "本机日志口径含 cache_read · 不含网页 Chat / Cowork 消耗".l10n
             )
             claudeRecentEvents
+          case .tool(let provider):
+            // 预付费平台：主环 + 余额卡；没有本机日志，所以没有 token 看板
+            if let tool = store.displayTools.first(where: { $0.id == provider }) {
+              providerGaugePanel(tool)
+              providerCards(tool)
+            }
           case .all:
             allGaugePanel
             allSummaryBoard
@@ -128,10 +137,11 @@ struct ExpandedDashboardView: View {
 
   private var toolTabPicker: some View {
     HStack(spacing: 6) {
-      ForEach(DashboardToolTab.allCases) { tab in
+      ForEach(store.enabledToolTabs) { tab in
         ToolTabButton(
           tab: tab,
           palette: palette,
+          families: store.enabledProviders.map(\.colorFamily),
           isSelected: store.selectedToolTab == tab
         ) {
           withAnimation(.easeInOut(duration: 0.16)) {
@@ -145,7 +155,7 @@ struct ExpandedDashboardView: View {
   private var claudeGaugePanel: some View {
     heroGaugePanel(
       event: store.claudeStatus?.main,
-      cool: true,
+      family: 1,
       unavailable: !store.claudeBalanceAvailable,
       freshness: claudeFreshnessText
     )
@@ -214,24 +224,23 @@ struct ExpandedDashboardView: View {
         )
 
       HStack(spacing: 14) {
-        HeroRingGroupView(
-          name: "Codex", event: store.status?.main, cool: false,
-          palette: palette, unavailable: store.status?.main == nil
-        )
-        .id("all-codex-\(palette.rawValue)")
-        .frame(maxWidth: .infinity)
-
-        Rectangle()
-          .fill(Color.white.opacity(0.08))
-          .frame(width: 1)
-          .padding(.vertical, 26)
-
-        HeroRingGroupView(
-          name: "Claude", event: store.claudeStatus?.main, cool: true,
-          palette: palette, unavailable: !store.claudeBalanceAvailable
-        )
-        .id("all-claude-\(palette.rawValue)")
-        .frame(maxWidth: .infinity)
+        ForEach(Array(store.displayTools.enumerated()), id: \.element.id) { index, tool in
+          if index > 0 {
+            Rectangle()
+              .fill(Color.white.opacity(0.08))
+              .frame(width: 1)
+              .padding(.vertical, 26)
+          }
+          HeroRingGroupView(
+            name: tool.name, event: tool.event, family: tool.colorFamily,
+            palette: palette, unavailable: tool.unavailable, centerText: tool.centerText
+          )
+          .id("all-\(tool.id.rawValue)-\(palette.rawValue)")
+          .frame(maxWidth: .infinity)
+          .contentShape(Rectangle())
+          .onTapGesture { store.selectedToolTab = .tool(tool.id) }
+          .help(tool.errorMessage ?? tool.name)
+        }
       }
       .padding(.vertical, 12)
       .padding(.horizontal, 12)
@@ -239,28 +248,156 @@ struct ExpandedDashboardView: View {
     .frame(height: 190)
   }
 
+  // MARK: - 预付费平台（DeepSeek / Kimi / SiliconFlow / OpenRouter …）
+
+  /// 主环面板：环心是金额，右侧是余额明细（赠送 / 充值 / 已用 / 满额基准）
+  private func providerGaugePanel(_ tool: DisplayTool) -> some View {
+    ZStack {
+      RoundedRectangle(cornerRadius: 12, style: .continuous)
+        .fill(
+          LinearGradient(
+            colors: [Color.black.opacity(0.16), palette.panelRaised.opacity(0.70)],
+            startPoint: .top, endPoint: .bottom
+          )
+        )
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Color.white.opacity(0.10), lineWidth: 1))
+
+      HStack(spacing: 26) {
+        ExpandedHeroRing(
+          event: tool.event, family: tool.colorFamily, palette: palette,
+          unavailable: tool.unavailable, centerText: tool.centerText
+        )
+        .frame(width: 210, height: 210)
+
+        VStack(alignment: .leading, spacing: 10) {
+          let tint = palette.toolColor(family: tool.colorFamily)
+          if let balance = tool.balance {
+            providerDetailRow("可用余额".l10n, balance.amountText, tint: tint)
+            if let granted = balance.grantedAmount {
+              providerDetailRow("平台赠送".l10n, balance.currencySymbol + String(format: "%.2f", granted), tint: nil)
+            }
+            if let topped = balance.toppedUpAmount {
+              providerDetailRow("自己充值".l10n, balance.currencySymbol + String(format: "%.2f", topped), tint: nil)
+            }
+            if let used = balance.usedAmount {
+              providerDetailRow("已消耗".l10n, balance.currencySymbol + String(format: "%.2f", used), tint: nil)
+            }
+            if let reference = balance.reference {
+              providerDetailRow("满额基准".l10n, balance.currencySymbol + String(format: "%.2f", reference), tint: nil)
+            } else {
+              Text("还没有基准：环暂不画比例。用几天后自动按历史最高余额画，或在设置里手填。".l10n)
+                .font(.system(size: 10.5, weight: .semibold))
+                .foregroundStyle(DashboardColors.subtleText)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+          } else {
+            Text(tool.errorMessage ?? "暂无数据 · 在设置里填入 API Key".l10n)
+              .font(.system(size: 12, weight: .semibold))
+              .foregroundStyle(DashboardColors.subtleText)
+              .fixedSize(horizontal: false, vertical: true)
+          }
+        }
+        .frame(width: 250, alignment: .leading)
+      }
+      .padding(.horizontal, 26)
+      .padding(.top, 16)
+
+      VStack {
+        HStack {
+          Spacer()
+          Text(tool.event.map { L("实时读取 %@ · %@", $0.sourceName, BalanceFormatters.dateTime($0.timestamp)) } ?? tool.id.vendorName)
+            .font(.system(size: 11, weight: .heavy))
+            .foregroundStyle(DashboardColors.subtleText)
+            .padding(.horizontal, 10).padding(.vertical, 6)
+            .background(
+              Capsule(style: .continuous)
+                .fill(Color.white.opacity(0.055))
+                .overlay(Capsule(style: .continuous).stroke(Color.white.opacity(0.08), lineWidth: 1))
+            )
+        }
+        Spacer()
+      }
+      .padding(14)
+    }
+    .frame(height: 268)
+  }
+
+  private func providerDetailRow(_ title: String, _ value: String, tint: Color?) -> some View {
+    HStack {
+      Text(title)
+        .font(.system(size: 11, weight: .semibold))
+        .foregroundStyle(Color.white.opacity(0.75))
+      Spacer(minLength: 8)
+      Text(value)
+        .font(.system(size: tint == nil ? 13 : 16, weight: .heavy, design: .rounded))
+        .foregroundStyle(tint ?? DashboardColors.text)
+        .monospacedDigit()
+    }
+  }
+
+  /// 余额卡 + 说明卡：这类平台按量计费，没有「几点重置」的概念
+  private func providerCards(_ tool: DisplayTool) -> some View {
+    let tint = palette.toolColor(family: tool.colorFamily)
+    return HStack(spacing: 12) {
+      MiniMetricCard(
+        title: "账户余额".l10n,
+        value: tool.balance?.amountText ?? "--",
+        tint: tint,
+        footnote: tool.balance?.remainingPercent.map { L("约为满额基准的 %@", BalanceFormatters.percent($0)) } ?? "无基准，仅显示金额".l10n,
+        surface: palette.panelRaised
+      )
+      MiniMetricCard(
+        title: "计费方式".l10n,
+        value: "按量".l10n,
+        tint: DashboardColors.text,
+        footnote: "用多少扣多少，不按时间窗口重置".l10n,
+        surface: palette.panelRaised
+      )
+    }
+  }
+
   private var allSummaryBoard: some View {
     VStack(alignment: .leading, spacing: 8) {
-      HStack(spacing: 8) {
-        Text("Codex")
-          .font(.system(size: 12, weight: .heavy))
-          .foregroundStyle(palette.weekly)
-          .frame(width: 52, alignment: .leading)
-        TokenSummaryStrip(stats: store.tokenStats, palette: palette)
+      if store.codexToolEnabled {
+        HStack(spacing: 8) {
+          Text("Codex")
+            .font(.system(size: 12, weight: .heavy))
+            .foregroundStyle(palette.weekly)
+            .frame(width: 52, alignment: .leading)
+          TokenSummaryStrip(stats: store.tokenStats, palette: palette)
+        }
       }
-      HStack(spacing: 8) {
-        Text("Claude")
-          .font(.system(size: 12, weight: .heavy))
-          .foregroundStyle(palette.claudeWeekly)
-          .frame(width: 52, alignment: .leading)
-        TokenSummaryStrip(
-          stats: store.claudeTokenStats,
-          palette: palette,
-          primaryTint: palette.claudeFiveHour,
-          secondaryTint: palette.claudeWeekly
-        )
+      if store.claudeToolEnabled {
+        HStack(spacing: 8) {
+          Text("Claude")
+            .font(.system(size: 12, weight: .heavy))
+            .foregroundStyle(palette.claudeWeekly)
+            .frame(width: 52, alignment: .leading)
+          TokenSummaryStrip(
+            stats: store.claudeTokenStats,
+            palette: palette,
+            primaryTint: palette.claudeFiveHour,
+            secondaryTint: palette.claudeWeekly
+          )
+        }
       }
-      Text("两个工具的 token 口径不同，不相加".l10n)
+      ForEach(store.displayTools.filter { $0.id.kind == .prepaidBalance }) { tool in
+        HStack(spacing: 8) {
+          Text(tool.name)
+            .font(.system(size: 12, weight: .heavy))
+            .foregroundStyle(palette.toolColor(family: tool.colorFamily))
+            .frame(width: 52, alignment: .leading)
+          Text(tool.balance?.amountText ?? (tool.errorMessage ?? "--"))
+            .font(.system(size: 12, weight: .heavy, design: .rounded))
+            .foregroundStyle(DashboardColors.text)
+            .monospacedDigit()
+          Text("按量计费 · 余额".l10n)
+            .font(.system(size: 10.5, weight: .semibold))
+            .foregroundStyle(DashboardColors.subtleText)
+          Spacer()
+        }
+      }
+      Text("各平台口径不同，不相加".l10n)
         .font(.system(size: 10.5, weight: .semibold))
         .foregroundStyle(DashboardColors.subtleText)
         .frame(maxWidth: .infinity, alignment: .trailing)
@@ -276,7 +413,7 @@ struct ExpandedDashboardView: View {
   /// 展开态主环面板：左主环（瓶颈窗口）+ 右「窗口速览」竖列，任意窗口数同构
   private func heroGaugePanel(
     event: RateLimitEvent?,
-    cool: Bool,
+    family: Int,
     unavailable: Bool,
     freshness: String?
   ) -> some View {
@@ -295,9 +432,9 @@ struct ExpandedDashboardView: View {
         )
 
       HStack(spacing: 26) {
-        ExpandedHeroRing(event: event, cool: cool, palette: palette, unavailable: unavailable)
+        ExpandedHeroRing(event: event, family: family, palette: palette, unavailable: unavailable)
           .frame(width: 210, height: 210)
-        WindowQuickListView(event: event, cool: cool, palette: palette, unavailable: unavailable)
+        WindowQuickListView(event: event, family: family, palette: palette, unavailable: unavailable)
           .frame(width: 250)
       }
       .padding(.horizontal, 26)
@@ -329,7 +466,7 @@ struct ExpandedDashboardView: View {
   private var gaugePanel: some View {
     heroGaugePanel(
       event: store.status?.main,
-      cool: false,
+      family: 0,
       unavailable: store.status?.main == nil,
       freshness: freshnessText
     )
@@ -415,28 +552,45 @@ struct ExpandedDashboardView: View {
           .foregroundStyle(DashboardColors.subtleText)
       }
 
-      settingsSection(title: "监控工具".l10n, systemImage: "wrench.and.screwdriver.fill") {
-        HStack(spacing: 8) {
-          toolChip(
-            title: "Codex",
-            subtitle: "OpenAI Codex",
-            isOn: store.codexToolEnabled,
-            tint: palette.fiveHour
-          ) {
-            store.codexToolEnabled.toggle()
-          }
-          toolChip(
-            title: "Claude",
-            subtitle: "Claude Code",
-            isOn: store.claudeToolEnabled,
-            tint: palette.claudeFiveHour
-          ) {
-            store.claudeToolEnabled.toggle()
+      settingsSection(title: "监控平台".l10n, systemImage: "wrench.and.screwdriver.fill") {
+        // 已启用的平台：按显示顺序排列，可上下调序、可移除
+        VStack(spacing: 6) {
+          ForEach(Array(store.enabledProviders.enumerated()), id: \.element) { index, provider in
+            providerRow(provider, index: index)
           }
         }
-        Text("按你实际使用的工具勾选，浮窗、Touch Bar 和面板都会跟随；至少保留一个".l10n)
+
+        // 添加平台：下拉菜单，选一个就加到末尾
+        HStack(spacing: 10) {
+          Menu {
+            ForEach(store.availableProviders) { provider in
+              Button {
+                store.enable(provider)
+              } label: {
+                Text("\(provider.displayName) · \(provider.vendorName)")
+              }
+            }
+            if store.availableProviders.isEmpty {
+              Text("全部平台都已添加".l10n)
+            }
+          } label: {
+            Label("添加平台".l10n, systemImage: "plus.circle.fill")
+              .font(.system(size: 12, weight: .heavy))
+          }
+          .menuStyle(.borderlessButton)
+          .fixedSize()
+          .disabled(store.availableProviders.isEmpty)
+
+          Spacer()
+          Text(L("已启用 %d 个平台", store.enabledProviders.count))
+            .font(.system(size: 10.5, weight: .semibold))
+            .foregroundStyle(DashboardColors.subtleText)
+        }
+
+        Text("选几个就显示几个环 / 条 / 数字，顺序就是显示顺序；至少保留一个。Codex 与 Claude 读本机登录状态，其余平台填你自己的 API Key（只存本机，不上传）。".l10n)
           .font(.system(size: 10.5, weight: .semibold))
           .foregroundStyle(DashboardColors.subtleText)
+          .fixedSize(horizontal: false, vertical: true)
       }
 
       settingsSection(title: "外观".l10n, systemImage: "slider.horizontal.3") {
@@ -785,6 +939,112 @@ struct ExpandedDashboardView: View {
             .stroke(Color.white.opacity(0.08), lineWidth: 1)
         )
     )
+  }
+
+  /// 设置面板里的一行已启用平台：色点 + 名字 + 状态；预付费平台多一行 API Key / 满额基准输入
+  private func providerRow(_ provider: ToolID, index: Int) -> some View {
+    let tint = palette.toolColor(family: provider.colorFamily)
+    let tool = store.displayTools.first { $0.id == provider }
+    let statusText: String = {
+      guard let tool else { return "" }
+      if let error = tool.errorMessage { return error }
+      if let balance = tool.balance { return balance.amountText }
+      if tool.unavailable { return "暂无数据".l10n }
+      return "已连接".l10n
+    }()
+    return VStack(alignment: .leading, spacing: 6) {
+      HStack(spacing: 8) {
+        Circle().fill(tint).frame(width: 9, height: 9)
+        VStack(alignment: .leading, spacing: 1) {
+          Text(provider.displayName)
+            .font(.system(size: 12.5, weight: .heavy))
+            .foregroundStyle(DashboardColors.text)
+          Text(provider.vendorName)
+            .font(.system(size: 10, weight: .bold))
+            .foregroundStyle(DashboardColors.subtleText)
+        }
+        Spacer(minLength: 8)
+        Text(statusText)
+          .font(.system(size: 10.5, weight: .semibold))
+          .foregroundStyle((tool?.errorMessage != nil) ? Color.orange.opacity(0.9) : DashboardColors.subtleText)
+          .lineLimit(1)
+          .truncationMode(.middle)
+          .frame(maxWidth: 170, alignment: .trailing)
+        HStack(spacing: 2) {
+          Button { store.move(provider, direction: -1) } label: {
+            Image(systemName: "chevron.up").font(.system(size: 9, weight: .heavy))
+          }
+          .buttonStyle(.plain).disabled(index == 0).opacity(index == 0 ? 0.3 : 0.8)
+          Button { store.move(provider, direction: 1) } label: {
+            Image(systemName: "chevron.down").font(.system(size: 9, weight: .heavy))
+          }
+          .buttonStyle(.plain)
+          .disabled(index == store.enabledProviders.count - 1)
+          .opacity(index == store.enabledProviders.count - 1 ? 0.3 : 0.8)
+          Button { store.disable(provider) } label: {
+            Image(systemName: "xmark.circle.fill").font(.system(size: 12, weight: .heavy))
+          }
+          .buttonStyle(.plain)
+          .disabled(store.enabledProviders.count <= 1)
+          .opacity(store.enabledProviders.count <= 1 ? 0.3 : 0.8)
+          .help("移除该平台".l10n)
+        }
+        .foregroundStyle(DashboardColors.text)
+      }
+
+      if provider.kind == .prepaidBalance {
+        HStack(spacing: 8) {
+          SecureField("API Key".l10n, text: Binding(
+            get: { keyDrafts[provider] ?? store.apiKey(for: provider) },
+            set: { keyDrafts[provider] = $0 }
+          ))
+          .textFieldStyle(.roundedBorder)
+          .font(.system(size: 11, design: .monospaced))
+          .onSubmit { commitKey(provider) }
+          Button("保存".l10n) { commitKey(provider) }
+            .font(.system(size: 11, weight: .heavy))
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+          TextField("满额基准".l10n, text: Binding(
+            get: { referenceDrafts[provider] ?? store.referenceAmount(for: provider).map { String(format: "%.0f", $0) } ?? "" },
+            set: { referenceDrafts[provider] = $0 }
+          ))
+          .textFieldStyle(.roundedBorder)
+          .font(.system(size: 11, design: .monospaced))
+          .frame(width: 78)
+          .onSubmit { commitReference(provider) }
+          .help("画环用的「满额」金额，例如你平时充 100 就填 100；留空则按历史最高余额".l10n)
+          if let url = provider.apiKeyHelpURL {
+            Button { NSWorkspace.shared.open(url) } label: {
+              Image(systemName: "questionmark.circle").font(.system(size: 12, weight: .heavy))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(DashboardColors.subtleText)
+            .help("去平台控制台获取 API Key".l10n)
+          }
+        }
+        .padding(.leading, 17)
+      }
+    }
+    .padding(.horizontal, 10)
+    .padding(.vertical, 8)
+    .background(
+      RoundedRectangle(cornerRadius: 8, style: .continuous)
+        .fill(tint.opacity(0.10))
+        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(tint.opacity(0.35), lineWidth: 1))
+    )
+  }
+
+  private func commitKey(_ provider: ToolID) {
+    guard let draft = keyDrafts[provider] else { return }
+    store.setAPIKey(draft, for: provider)
+    keyDrafts[provider] = nil
+  }
+
+  private func commitReference(_ provider: ToolID) {
+    guard let draft = referenceDrafts[provider] else { return }
+    store.setReferenceAmount(Double(draft.trimmingCharacters(in: .whitespaces)), for: provider)
+    referenceDrafts[provider] = nil
   }
 
   private func toolChip(
@@ -2312,6 +2572,8 @@ private struct SizeModeCard: View {
 private struct ToolTabButton: View {
   var tab: DashboardToolTab
   var palette: DashboardPalette
+  /// 「全部」按钮用：已启用平台的色族，画成叠在一起的色点
+  var families: [Int] = [0, 1]
   var isSelected: Bool
   var action: () -> Void
 
@@ -2319,14 +2581,13 @@ private struct ToolTabButton: View {
     Button(action: action) {
       HStack(spacing: 6) {
         switch tab {
-        case .codex:
-          Circle().fill(palette.fiveHour).frame(width: 7, height: 7)
-        case .claude:
-          Circle().fill(palette.claudeFiveHour).frame(width: 7, height: 7)
+        case .tool(let tool):
+          Circle().fill(palette.toolColor(family: tool.colorFamily)).frame(width: 7, height: 7)
         case .all:
           HStack(spacing: -2) {
-            Circle().fill(palette.fiveHour).frame(width: 7, height: 7)
-            Circle().fill(palette.claudeFiveHour).frame(width: 7, height: 7)
+            ForEach(Array(families.prefix(4).enumerated()), id: \.offset) { _, family in
+              Circle().fill(palette.toolColor(family: family)).frame(width: 7, height: 7)
+            }
           }
         }
         Text(tab.title)

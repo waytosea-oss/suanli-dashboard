@@ -130,12 +130,29 @@ extension DashboardPalette {
   /// 窗口序号取色：色=窗口身份（按固定排序：短周期→长周期→模型专属）。
   /// Codex 暖族、Claude 冷族；超出部分用备用色循环。
   func windowColor(cool: Bool, index: Int) -> Color {
-    let warm: [Color] = [fiveHour, weekly, Color(red: 0.94, green: 0.63, blue: 0.51)]   // 粉/琥珀/珊瑚
+    windowColor(family: cool ? 1 : 0, index: index)
+  }
+
+  /// 按平台色族取色（ToolID.colorFamily）：
+  ///   0 暖族 Codex   1 冷族 Claude   2 青绿 DeepSeek   3 紫 Kimi   4 橙 SiliconFlow   5 靛 OpenRouter
+  /// 每族内部再按窗口序号取色；序号超出用族内色循环。
+  func windowColor(family: Int, index: Int) -> Color {
+    let warm: [Color] = [fiveHour, weekly, Color(red: 0.94, green: 0.63, blue: 0.51)]
     let cold: [Color] = [claudeFiveHour, claudeWeekly,
-                         Color(red: 0.50, green: 0.81, blue: 0.76),                      // 青 #7FCFC3
-                         Color(red: 0.78, green: 0.62, blue: 0.88)]                      // 粉紫
-    let family = cool ? cold : warm
-    return family[index % family.count]
+                         Color(red: 0.50, green: 0.81, blue: 0.76),
+                         Color(red: 0.78, green: 0.62, blue: 0.88)]
+    let teal: [Color] = [Color(red: 0.36, green: 0.86, blue: 0.72), Color(red: 0.26, green: 0.70, blue: 0.62)]
+    let violet: [Color] = [Color(red: 0.76, green: 0.60, blue: 0.98), Color(red: 0.58, green: 0.46, blue: 0.86)]
+    let orange: [Color] = [Color(red: 1.00, green: 0.66, blue: 0.36), Color(red: 0.92, green: 0.52, blue: 0.28)]
+    let indigo: [Color] = [Color(red: 0.55, green: 0.66, blue: 1.00), Color(red: 0.42, green: 0.52, blue: 0.90)]
+    let families = [warm, cold, teal, violet, orange, indigo]
+    let chosen = families[max(0, family) % families.count]
+    return chosen[max(0, index) % chosen.count]
+  }
+
+  /// 平台主色（分段按钮色点、设置面板芯片用）
+  func toolColor(family: Int) -> Color {
+    windowColor(family: family, index: 0)
   }
 }
 
