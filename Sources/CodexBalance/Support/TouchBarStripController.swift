@@ -129,25 +129,37 @@ final class TouchBarStripController: NSObject, NSTouchBarDelegate {
       guard let bottleneck = tool.bottleneck else { return (nil, .white) }
       return (bottleneck.percent, bottleneck.color)
     }
+    let maxTrayWidth: CGFloat = 200   // 控制条右侧空间有限，过宽会被系统整个丢掉
     for (index, tool) in tools.enumerated() {
+      let piece = NSMutableAttributedString()
       if index > 0 {
-        text.append(NSAttributedString(string: "  ", attributes: [.font: NSFont.systemFont(ofSize: 6)]))
+        piece.append(NSAttributedString(string: "  ", attributes: [.font: NSFont.systemFont(ofSize: 6)]))
       }
       let (percent, color) = tighter(tool)
       let effective = (percent ?? 100) < 20 ? NSColor.systemRed : color
-      text.append(NSAttributedString(string: tool.letter, attributes: [
+      piece.append(NSAttributedString(string: tool.letter, attributes: [
         .font: NSFont.systemFont(ofSize: 10, weight: .heavy),
         .foregroundColor: effective.withAlphaComponent(0.85),
         .baselineOffset: 2.5
       ]))
       let value = tool.bottleneck?.valueText ?? (percent.map { "\(Int($0.rounded()))" } ?? "--")
-      text.append(NSAttributedString(string: value, attributes: [
+      piece.append(NSAttributedString(string: value, attributes: [
         .font: NSFont.monospacedDigitSystemFont(ofSize: 15, weight: .heavy),
         .foregroundColor: effective
       ]))
+      let remaining = tools.count - index
+      let reserve: CGFloat = remaining > 1 ? 26 : 0   // 给 "+n" 留位
+      if index > 0, text.size().width + piece.size().width + reserve > maxTrayWidth {
+        text.append(NSAttributedString(string: " +\(remaining)", attributes: [
+          .font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .heavy),
+          .foregroundColor: NSColor.white.withAlphaComponent(0.6)
+        ]))
+        break
+      }
+      text.append(piece)
     }
     trayButton.attributedTitle = text
-    trayWidthConstraint?.constant = max(96, ceil(text.size().width) + 22)
+    trayWidthConstraint?.constant = min(maxTrayWidth + 22, max(96, ceil(text.size().width) + 22))
   }
 
   // MARK: - 全宽面板
@@ -313,6 +325,9 @@ private final class BalanceStripView: NSView {
   @available(*, unavailable)
   required init?(coder: NSCoder) { fatalError() }
 
+  /// 平台 ≥4 个时全数字样式每个平台只画瓶颈窗口那一个数字，否则总宽远超 Touch Bar
+  private var numbersOnlyBottleneck: Bool { tools.count >= 4 }
+
   /// 会话区开启且是进度条样式时收紧余额区，避免总宽超出 Touch Bar 被裁掉
   private var isTight: Bool {
     !sessions.isEmpty && (style == .barsQuad || style == .bars)
@@ -327,7 +342,8 @@ private final class BalanceStripView: NSView {
     // 带竖排标签时每项再加约 14pt。
     case .numbersAll:
       let perWindow: CGFloat = (showsPercentSign ? 52 : 40) + (showsWindowTags ? 14 : 0)
-      perTool = perWindow * maxWindows + 10 * (maxWindows - 1) + 16
+      let windowsShown: CGFloat = numbersOnlyBottleneck ? 1 : maxWindows
+      perTool = perWindow * windowsShown + 10 * (windowsShown - 1) + 16
     case .barsQuad: perTool = (isTight ? 140 : 200) + maxWindows * 37
     case .bars: perTool = isTight ? 204 : 292
     case .badgeQuad: perTool = 130 + (maxWindows - 1) * 26
@@ -362,8 +378,16 @@ private final class BalanceStripView: NSView {
 
     sessionHitRects = []
     var x: CGFloat = 52 // 最左侧是 ⤢ 按钮的固定区域
+    let limit = bounds.width - 10
     for (index, tool) in tools.enumerated() {
       if index > 0 {
+        // 剩余宽度连一个最小平台块（字母块 + "--"）都放不下：画 "+n" 收尾，绝不画一半
+        if x + 24 + 70 > limit {
+          draw(text: "+\(tools.count - index)", at: NSPoint(x: x + 14, y: bounds.midY),
+               font: .monospacedDigitSystemFont(ofSize: 12, weight: .heavy),
+               color: NSColor.white.withAlphaComponent(0.6))
+          break
+        }
         x += 12
         drawSeparator(at: x)
         x += 12
@@ -532,7 +556,12 @@ private final class BalanceStripView: NSView {
       // 用户最常盯的是 Fable，而瓶颈规则会把"最紧的那个"放大、其余缩成小点，
       // 导致 Fable 有时是大数字有时是小点，位置还会跳。这里全部等大、位置固定。
       var cx = x
-      for (index, window) in displayOrdered(tool.windows).enumerated() {
+      if tool.windows.isEmpty {
+        // 没数据（未填 Key / 接口失败）：老实画 "--"，不能只剩一个字母块
+        return cx + drawBigNumber("--", at: cx, centerY: midY + 2, color: NSColor.white.withAlphaComponent(0.35))
+      }
+      let shown = numbersOnlyBottleneck ? [bottleneck ?? tool.windows[0]] : displayOrdered(tool.windows)
+      for (index, window) in shown.enumerated() {
         if index > 0 { cx += 10 }
         let effective = (window.percent ?? 100) < 20 ? NSColor.systemRed : window.color
         if showsWindowTags {
