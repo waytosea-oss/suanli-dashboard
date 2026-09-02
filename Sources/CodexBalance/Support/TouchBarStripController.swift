@@ -71,8 +71,15 @@ final class TouchBarStripController: NSObject, NSTouchBarDelegate {
   func setEnabled(_ enabled: Bool) {
     guard isSupported else { return }
     if enabled {
+      // 只装 Control Strip 里的小图标，不自动铺开全宽面板。
+      //
+      // 全宽面板走 presentSystemModalTouchBar，那个 API 会整条接管 Touch Bar，
+      // 系统的亮度/音量/Siri 全部被盖住。启动就自动铺开的话，用户每次开机
+      // 都会丢掉控制条，而且没有明显的退回方式。
+      //
+      // 常驻状态 = 小图标（显示余额数字，与系统控制条并存）；
+      // 想看大数字面板时点一下小图标展开，再点一下收回。
       installIfNeeded()
-      presentPanel()
     } else {
       dismissPanel()
       uninstall()
@@ -216,9 +223,31 @@ final class TouchBarStripController: NSObject, NSTouchBarDelegate {
     installed = false
   }
 
+  /// 进程退出前必须调用：把整条 Touch Bar 还给系统。
+  /// 全宽面板走的是 presentSystemModalTouchBar（私有 API），它会整条接管 Touch Bar，
+  /// 系统的亮度/音量控制条会被完全盖住。若进程在"面板已铺开"时被强杀（pkill/崩溃），
+  /// dismiss 没机会执行，接管状态就烂在 TouchBarServer 里，用户的亮度音量条会一直消失，
+  /// 只能靠 killall ControlStrip 手动救。这里做成幂等，可安全重复调用。
+  func releaseTouchBar() {
+    dismissPanel()
+    panelPresented = false
+    uninstall()
+  }
+
+  /// 全宽面板当前是否铺开（用于点击切换）
+  private var panelPresented = false
+
   @objc private func handleTrayTap() {
-    // 点托盘小块 → 重新铺开全宽面板
-    presentPanel()
+    // 点小图标 = 展开/收回 切换。
+    // 必须能收回：全宽面板会盖住系统亮度/音量条，
+    // 只能展开不能收的话，用户看完就回不去了。
+    if panelPresented {
+      dismissPanel()
+      panelPresented = false
+    } else {
+      presentPanel()
+      panelPresented = true
+    }
   }
 }
 
@@ -291,14 +320,26 @@ private final class BalanceStripView: NSView {
     let maxWindows = CGFloat(max(codex?.windows.count ?? 0, claude?.windows.count ?? 0, 1))
     var perTool: CGFloat
     switch style {
+    // 全数字：每个窗口都是等大数字（22pt 重体，含 % 约 52pt）+ 窗口间距 10pt；
+    // 带竖排标签时每项再加约 14pt。
+    case .numbersAll:
+      let perWindow: CGFloat = (showsPercentSign ? 52 : 40) + (showsWindowTags ? 14 : 0)
+      perTool = perWindow * maxWindows + 10 * (maxWindows - 1) + 16
     case .barsQuad: perTool = (isTight ? 140 : 200) + maxWindows * 37
     case .bars: perTool = isTight ? 204 : 292
     case .badgeQuad: perTool = 130 + (maxWindows - 1) * 26
     case .badge: perTool = 106 + (maxWindows > 1 ? 10 : 0)
     }
-    if !showsWindowTags { perTool -= (style == .badgeQuad ? 24 : 12) }
+    if !showsWindowTags && style != .numbersAll { perTool -= (style == .badgeQuad ? 24 : 12) }
     let chipWidth: CGFloat = sessions.count == 1 ? 216 : (sessions.count == 2 ? 148 : 118)
-    let sessionsWidth = sessions.isEmpty ? 0 : CGFloat(sessions.count) * chipWidth + 16
+    var sessionsWidth = sessions.isEmpty ? 0 : CGFloat(sessions.count) * chipWidth + 16
+    // 全数字样式：数字是主角，绝不能被会话条目挤掉。
+    // 先算出数字区需要多少，剩下的才给会话区。
+    if style == .numbersAll {
+      let toolsWidth = perTool * CGFloat(count) + 24 * CGFloat(count - 1) + 64
+      let available = (measuredWidth ?? 920) - 8 - toolsWidth - 52
+      sessionsWidth = max(0, min(sessionsWidth, available))
+    }
     let ideal = perTool * CGFloat(count) + 24 * CGFloat(count - 1) + 64 + sessionsWidth
     // 封顶在实测的 Touch Bar 宽度内（未挂窗口时先给保守值），
     // 右侧 ⤢ 按钮永远可见，会话区在 draw 里按剩余空间自适应
@@ -482,6 +523,27 @@ private final class BalanceStripView: NSView {
         percentFontSize: 22, percentAdvance: 60, showsCountdown: !isTight
       )
       return x + width
+    case .numbersAll:
+      // 全数字：每个窗口一个等大数字 + 正下方倒计时条，不区分主次。
+      // 用户最常盯的是 Fable，而瓶颈规则会把"最紧的那个"放大、其余缩成小点，
+      // 导致 Fable 有时是大数字有时是小点，位置还会跳。这里全部等大、位置固定。
+      var cx = x
+      for (index, window) in displayOrdered(tool.windows).enumerated() {
+        if index > 0 { cx += 10 }
+        let effective = (window.percent ?? 100) < 20 ? NSColor.systemRed : window.color
+        if showsWindowTags {
+          cx += drawVerticalLabel(shortLabel(window), at: cx, centerY: midY,
+                                  color: NSColor.white.withAlphaComponent(0.55)) + 3
+        }
+        let text = window.percent.map { "\(Int($0.rounded()))\(percentSuffix)" } ?? "--"
+        let numberWidth = drawBigNumber(text, at: cx, centerY: midY + 2, color: effective)
+        drawResetUnderline(
+          x: cx, width: numberWidth, reset: window.reset,
+          mode: window.hourScale ? .hours : .days, color: effective
+        )
+        cx += numberWidth
+      }
+      return cx
     case .badgeQuad:
       // 详述：瓶颈大数字（竖排标签+下划线）+ 其余窗口 chips [色点+小数字]
       var cx = x
@@ -636,6 +698,34 @@ private final class BalanceStripView: NSView {
     color.setFill()
     NSRect(x: x, y: y, width: width * fraction, height: barHeight).fill()
     NSGraphicsContext.current?.restoreGraphicsState()
+  }
+
+  /// 「全数字」样式的短标签：竖排每字符占 10pt，而 Touch Bar 只有 30pt 高，
+  /// 所以最多 2 个字符，否则会顶出边界。
+  ///   5 小时窗口      → 5时
+  ///   模型专属周窗口  → 模型名前 2 字（如 Fable → Fa），靠颜色进一步区分
+  ///   账号级周窗口    → 7天（和 Codex 的写法保持一致）
+  private func shortLabel(_ w: TouchBarStripController.TBWindow) -> String {
+    if w.hourScale { return "5时" }
+    if let range = w.label.range(of: "·"), !w.label.contains("全部") {
+      let model = String(w.label[range.upperBound...])
+      return String(model.prefix(2))
+    }
+    return "7天"
+  }
+
+  /// 「全数字」样式的窗口顺序：模型专属（如 周·Fable）→ 小时窗口（5时）→ 账号级周窗口。
+  /// 用户最关心模型专属额度，放最左；顺序固定，不随瓶颈变化而跳位。
+  private func displayOrdered(_ windows: [TouchBarStripController.TBWindow])
+    -> [TouchBarStripController.TBWindow] {
+    func rank(_ w: TouchBarStripController.TBWindow) -> Int {
+      if w.hourScale { return 1 }                       // 5 小时窗口
+      if w.label.contains("·") && !w.label.contains("全部") { return 0 }  // 模型专属，如 周·Fable
+      return 2                                          // 周·全部 等账号级
+    }
+    return windows.enumerated()
+      .sorted { (rank($0.element), $0.offset) < (rank($1.element), $1.offset) }
+      .map(\.element)
   }
 
   /// 顶满 Touch Bar 高度的大号数字，返回实际宽度

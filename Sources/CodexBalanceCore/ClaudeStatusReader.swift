@@ -653,7 +653,17 @@ final class ClaudeOAuthUsageSource: @unchecked Sendable {
     return nil
   }
 
+  // 续期节流：续期失败后至少隔 5 分钟再试。
+  // 没有这道闸，一旦 token 过期而续期又失败，每轮刷新都会打一次
+  // token 接口，很快就会被 429 限流，然后陷入"越失败越请求"的循环。
+  private static let renewThrottle = ClaudeRenewThrottle(interval: 300)
+
+  private static func renewAllowed() -> Bool { renewThrottle.allowed() }
+
+  private static func noteRenewResult(success: Bool) { renewThrottle.note(success: success) }
+
   private func renewAccessTokenDetailed(refreshToken: String) -> RenewOutcome {
+    guard Self.renewAllowed() else { return .networkFailure }
     guard let url = URL(string: "https://console.anthropic.com/v1/oauth/token") else { return .networkFailure }
     var request = URLRequest(url: url)
     request.httpMethod = "POST"
@@ -688,15 +698,24 @@ final class ClaudeOAuthUsageSource: @unchecked Sendable {
        let accessToken = object["access_token"] as? String,
        !accessToken.isEmpty {
       let expiresIn = (object["expires_in"] as? Double) ?? 3600
+      Self.noteRenewResult(success: true)
       return .success(ClaudeOAuthCredentials(
         accessToken: accessToken,
         refreshToken: (object["refresh_token"] as? String) ?? refreshToken,
         expiresAt: Date().addingTimeInterval(expiresIn)
       ))
     }
-    // 4xx = 凭据被拒（链死）；其余（0=超时断网、5xx）都算网络问题
+    // 凭据被拒（链死）只有 400/401/403 三种；
+    // 429 是限流、408 是超时，都属于"稍后再试"，绝不能当成链死——
+    // 误判会让 App 放弃续期并退回不存在的明文文件，Claude 侧就此卡在过期值上。
     let code = statusBox.value
-    return (400..<500).contains(code) ? .authRejected : .networkFailure
+    Self.noteRenewResult(success: false)
+    switch code {
+    case 400, 401, 403:
+      return .authRejected
+    default:
+      return .networkFailure
+    }
   }
 
   private func readCredentialsFileCredentials() -> ClaudeOAuthCredentials? {
@@ -786,4 +805,44 @@ private func claudeAsciiContains<S: Sequence>(_ haystack: S, _ needle: [UInt8]) 
     }
   }
   return false
+}
+
+/// 续期节流器：失败后指数退避，避免把自己打进（或长期困在）限流。
+/// 间隔序列 5→10→20→40→60 分钟封顶；一次成功即复位。
+/// 固定间隔不够用：Anthropic 的限流是按出口 IP 计的，
+/// 每 5 分钟一次的持续叩门会让限流窗口迟迟不退。
+private final class ClaudeRenewThrottle: @unchecked Sendable {
+  private let lock = NSLock()
+  private let base: TimeInterval
+  private let cap: TimeInterval
+  private var lastFailureAt: Date?
+  private var consecutiveFailures = 0
+
+  init(interval: TimeInterval, cap: TimeInterval = 3600) {
+    self.base = interval
+    self.cap = cap
+  }
+
+  private var currentDelay: TimeInterval {
+    guard consecutiveFailures > 0 else { return 0 }
+    let factor = pow(2.0, Double(consecutiveFailures - 1))
+    return min(base * factor, cap)
+  }
+
+  func allowed() -> Bool {
+    lock.lock(); defer { lock.unlock() }
+    guard let last = lastFailureAt else { return true }
+    return Date().timeIntervalSince(last) >= currentDelay
+  }
+
+  func note(success: Bool) {
+    lock.lock(); defer { lock.unlock() }
+    if success {
+      lastFailureAt = nil
+      consecutiveFailures = 0
+    } else {
+      lastFailureAt = Date()
+      consecutiveFailures = min(consecutiveFailures + 1, 8)
+    }
+  }
 }

@@ -90,6 +90,7 @@ enum CompactStyle: String, CaseIterable, Identifiable, Hashable {
 
 /// Touch Bar 全宽面板的显示样式（与屏幕悬浮样式独立选择）
 enum TouchBarPanelStyle: String, CaseIterable, Identifiable, Hashable {
+  case numbersAll
   case barsQuad
   case bars
   case badgeQuad
@@ -99,6 +100,7 @@ enum TouchBarPanelStyle: String, CaseIterable, Identifiable, Hashable {
 
   var title: String {
     switch self {
+    case .numbersAll: "全数字".l10n
     case .barsQuad: "四进度条".l10n
     case .bars: "双进度条".l10n
     case .badgeQuad: "四数字".l10n
