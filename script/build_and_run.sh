@@ -84,9 +84,9 @@ cat > "$APP_PATH/Contents/Info.plist" <<PLIST
     <string>pt-BR</string>
   </array>
   <key>CFBundleShortVersionString</key>
-  <string>0.1.0</string>
+  <string>1.2.0</string>
   <key>CFBundleVersion</key>
-  <string>1</string>
+  <string>120</string>
   <key>LSMinimumSystemVersion</key>
   <string>14.0</string>
   <key>NSHighResolutionCapable</key>
