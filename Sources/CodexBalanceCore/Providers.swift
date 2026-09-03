@@ -305,16 +305,18 @@ public final class APIKeyBalanceSource: @unchecked Sendable {
       request.setValue(entry.apiKey, forHTTPHeaderField: "Authorization")
       request.setValue("zh-CN,zh", forHTTPHeaderField: "Accept-Language")
     } else if provider == .grok {
-      // grok.com 网页内部接口：POST + 登录 Cookie。用户贴的可能是裸 sso 值，也可能是整串 Cookie
+      // grok.com 网页内部的 grpc-web 接口（设置 → 用量 那一页用的就是它）：POST 一个空请求帧 + 登录 Cookie。
+      // 用户贴的可能是裸 sso 值，也可能是整串 Cookie
       request.httpMethod = "POST"
-      request.httpBody = try? JSONSerialization.data(withJSONObject: ["requestKind": "DEFAULT", "modelName": "grok-4-auto"])
-      request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+      request.httpBody = Data([0, 0, 0, 0, 0])
+      request.setValue("application/grpc-web+proto", forHTTPHeaderField: "Content-Type")
+      request.setValue("1", forHTTPHeaderField: "X-Grpc-Web")
       request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Safari/537.36", forHTTPHeaderField: "User-Agent")
       request.setValue(Self.grokCookieHeader(entry.apiKey), forHTTPHeaderField: "Cookie")
     } else {
       request.setValue("Bearer \(entry.apiKey)", forHTTPHeaderField: "Authorization")
     }
-    request.setValue("application/json", forHTTPHeaderField: "Accept")
+    request.setValue(provider == .grok ? "application/grpc-web+proto" : "application/json", forHTTPHeaderField: "Accept")
 
     let semaphore = DispatchSemaphore(value: 0)
     let box = FetchResultBox()
@@ -341,6 +343,9 @@ public final class APIKeyBalanceSource: @unchecked Sendable {
     default:
       return ProviderSnapshot(provider: provider, fetchedAt: now, sourceName: provider.vendorName, errorMessage: LC("接口返回 HTTP %d", status))
     }
+    if provider == .grok, let data {
+      return Self.grokCreditsSnapshot(data: data, now: now)
+    }
     guard let data,
           let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
     else {
@@ -358,7 +363,7 @@ public final class APIKeyBalanceSource: @unchecked Sendable {
     case .siliconflow: URL(string: "https://api.siliconflow.cn/v1/user/info")
     case .openrouter: URL(string: "https://openrouter.ai/api/v1/auth/key")
     case .glm: URL(string: "https://open.bigmodel.cn/api/monitor/usage/quota/limit")
-    case .grok: URL(string: "https://grok.com/rest/rate-limits")
+    case .grok: URL(string: "https://grok.com/grok_api_v2.GrokBuildBilling/GetGrokCreditsConfig")
     case .codex, .claude: nil
     }
   }
@@ -371,7 +376,6 @@ public final class APIKeyBalanceSource: @unchecked Sendable {
     now: Date
   ) -> ProviderSnapshot {
     if provider == .glm { return glmSnapshot(from: object, now: now) }
-    if provider == .grok { return grokSnapshot(from: object, now: now) }
     let symbol = provider.currencySymbol
     var balance: BalanceMetric?
 
@@ -538,31 +542,138 @@ extension APIKeyBalanceSource {
   ///   分档：{"highEffortRateLimits":{"remainingQueries":35,"totalQueries":50,"waitTimeSeconds":7200},
   ///         "lowEffortRateLimits":{"remainingQueries":120,"totalQueries":140,"waitTimeSeconds":1800}}
   /// 接口只给窗口长度不给重置时刻，所以 resetsAt 标 inferredReset。
-  public static func grokSnapshot(from object: [String: Any], now: Date) -> ProviderSnapshot {
+  /// 解析 GetGrokCreditsConfigResponse（grpc-web 帧 + protobuf）。
+  /// 字段来自 grok.com 前端里的 grok_build_billing.proto：
+  ///   config(1) { credit_usage_percent(1 float), billing_period_end(5 Timestamp),
+  ///               product_usage(7 repeated { product(1 enum), usage_percent(2 float) }),
+  ///               current_period(8 { type(1 enum 1=月 2=周), start(2), end(3 Timestamp) }) }
+  /// 只解这几项，其余字段跳过；解不出 config 就报错，不编数字。
+  public static func grokCreditsSnapshot(data: Data, now: Date) -> ProviderSnapshot {
     let name = ToolID.grok.vendorName
-    func window(_ dict: [String: Any], label: String) -> LabeledWindow? {
-      guard let remaining = number(dict["remainingQueries"]), let total = number(dict["totalQueries"]), total > 0 else { return nil }
-      let seconds = number(dict["windowSizeSeconds"]) ?? number(dict["waitTimeSeconds"]) ?? 0
-      let remainingPercent = min(100, max(0, remaining / total * 100))
-      return LabeledWindow(
-        label: label,
-        window: LimitWindow(
-          usedPercent: 100 - remainingPercent, remainingPercent: remainingPercent,
-          windowMinutes: seconds / 60,
-          resetsAt: seconds > 0 ? now.addingTimeInterval(seconds) : nil,
-          inferredReset: true
-        ),
-        isHourScale: seconds < 24 * 3600
-      )
+    guard let message = ProtoLite.firstGrpcWebMessage(data),
+          let config = ProtoLite.fields(message).first(where: { $0.number == 1 })?.bytes
+    else {
+      return ProviderSnapshot(provider: .grok, fetchedAt: now, sourceName: name, errorMessage: "接口返回里没有额度字段".coreL10n)
     }
-    var windows: [LabeledWindow] = []
-    if let high = object["highEffortRateLimits"] as? [String: Any], let w = window(high, label: "专家") { windows.append(w) }
-    if let low = object["lowEffortRateLimits"] as? [String: Any], let w = window(low, label: "快速") { windows.append(w) }
-    if windows.isEmpty, let w = window(object, label: "查询") { windows.append(w) }
-    guard !windows.isEmpty else {
-      let message = (object["message"] as? String).map { LC("接口返回：%@", $0) } ?? "接口返回里没有额度字段".coreL10n
-      return ProviderSnapshot(provider: .grok, fetchedAt: now, sourceName: name, errorMessage: message)
+    let fields = ProtoLite.fields(config)
+    var totalUsed: Double?
+    var periodEnd: Date?
+    var periodType = 0
+    var products: [(Int, Double)] = []
+    for f in fields {
+      switch f.number {
+      case 1: totalUsed = f.float
+      case 5: if let secs = ProtoLite.fields(f.bytes ?? Data()).first(where: { $0.number == 1 })?.varint { periodEnd = periodEnd ?? Date(timeIntervalSince1970: Double(secs)) }
+      case 7:
+        let sub = ProtoLite.fields(f.bytes ?? Data())
+        if let product = sub.first(where: { $0.number == 1 })?.varint, let pct = sub.first(where: { $0.number == 2 })?.float {
+          products.append((Int(product), pct))
+        }
+      case 8:
+        let sub = ProtoLite.fields(f.bytes ?? Data())
+        periodType = Int(sub.first(where: { $0.number == 1 })?.varint ?? 0)
+        if let end = sub.first(where: { $0.number == 3 })?.bytes,
+           let secs = ProtoLite.fields(end).first(where: { $0.number == 1 })?.varint {
+          periodEnd = Date(timeIntervalSince1970: Double(secs))
+        }
+      default: break
+      }
     }
-    return ProviderSnapshot(provider: .grok, fetchedAt: now, windows: windows, sourceName: name)
+    guard let totalUsed else {
+      return ProviderSnapshot(provider: .grok, fetchedAt: now, sourceName: name, errorMessage: "接口返回里没有额度字段".coreL10n)
+    }
+    let weekly = periodType != 1
+    let minutes: Double = weekly ? 7 * 24 * 60 : 30 * 24 * 60
+    func window(_ label: String, used: Double) -> LabeledWindow {
+      let u = min(100, max(0, used))
+      return LabeledWindow(label: label, window: LimitWindow(usedPercent: u, remainingPercent: 100 - u, windowMinutes: minutes, resetsAt: periodEnd), isHourScale: false)
+    }
+    var windows = [window(weekly ? "周·总" : "月·总", used: totalUsed)]
+    // 分项按已用从高到低，和网页「用量」页一致
+    for (product, pct) in products.sorted(by: { $0.1 > $1.1 }) {
+      windows.append(window(grokProductName(product), used: pct))
+    }
+    return ProviderSnapshot(provider: .grok, fetchedAt: now, windows: windows, sourceName: name + (weekly ? " · 周用量池" : " · 月用量池"))
+  }
+
+  /// billing_product.proto 里的 Product 枚举
+  public static func grokProductName(_ code: Int) -> String {
+    switch code {
+    case 1: "API"
+    case 2: "Build"
+    case 3: "插件"
+    case 4: "聊天"
+    case 5: "Imagine"
+    case 6: "语音"
+    case 7: "应用构建器"
+    case 8: "任务"
+    default: "产品\(code)"
+    }
+  }
+}
+
+/// 够用就好的 protobuf 读取器：只认 varint / fixed32 / fixed64 / length-delimited 四种线型
+public enum ProtoLite {
+  public struct Field {
+    public var number: Int
+    public var varint: UInt64?
+    public var float: Double?
+    public var bytes: Data?
+  }
+
+  /// grpc-web 响应 = 若干帧：1 字节标志 + 4 字节大端长度 + 内容；标志位 0x80 是 trailer
+  public static func firstGrpcWebMessage(_ data: Data) -> Data? {
+    var i = data.startIndex
+    while i + 5 <= data.endIndex {
+      let flags = data[i]
+      let len = Int(data[i + 1]) << 24 | Int(data[i + 2]) << 16 | Int(data[i + 3]) << 8 | Int(data[i + 4])
+      let start = i + 5
+      guard start + len <= data.endIndex else { return nil }
+      if flags & 0x80 == 0 { return data.subdata(in: start..<(start + len)) }
+      i = start + len
+    }
+    return nil
+  }
+
+  public static func fields(_ data: Data) -> [Field] {
+    var out: [Field] = []
+    var i = data.startIndex
+    func readVarint() -> UInt64? {
+      var result: UInt64 = 0; var shift: UInt64 = 0
+      while i < data.endIndex {
+        let b = data[i]; i += 1
+        result |= UInt64(b & 0x7f) << shift
+        if b & 0x80 == 0 { return result }
+        shift += 7
+        if shift > 63 { return nil }
+      }
+      return nil
+    }
+    while i < data.endIndex {
+      guard let key = readVarint() else { break }
+      let number = Int(key >> 3), wire = key & 7
+      switch wire {
+      case 0:
+        guard let v = readVarint() else { return out }
+        out.append(Field(number: number, varint: v))
+      case 1:
+        guard i + 8 <= data.endIndex else { return out }
+        let bits = data.subdata(in: i..<(i + 8)).withUnsafeBytes { $0.loadUnaligned(as: UInt64.self) }
+        i += 8
+        out.append(Field(number: number, float: Double(bitPattern: UInt64(littleEndian: bits))))
+      case 5:
+        guard i + 4 <= data.endIndex else { return out }
+        let bits = data.subdata(in: i..<(i + 4)).withUnsafeBytes { $0.loadUnaligned(as: UInt32.self) }
+        i += 4
+        out.append(Field(number: number, float: Double(Float(bitPattern: UInt32(littleEndian: bits)))))
+      case 2:
+        guard let len = readVarint(), i + Int(len) <= data.endIndex else { return out }
+        out.append(Field(number: number, bytes: data.subdata(in: i..<(i + Int(len)))))
+        i += Int(len)
+      default:
+        return out
+      }
+    }
+    return out
   }
 }

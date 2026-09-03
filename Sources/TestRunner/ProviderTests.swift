@@ -231,37 +231,37 @@ struct GLMParserTests {
 }
 
 
-@Suite("SuperGrok 解析")
-struct GrokParserTests {
-  @Test func parsesEffortTiers() {
-    let now = Date(timeIntervalSince1970: 1_700_000_000)
-    let object: [String: Any] = [
-      "highEffortRateLimits": ["remainingQueries": 35, "totalQueries": 50, "waitTimeSeconds": 7200],
-      "lowEffortRateLimits": ["remainingQueries": 120, "totalQueries": 160, "waitTimeSeconds": 1800]
-    ]
-    let snap = APIKeyBalanceSource.grokSnapshot(from: object, now: now)
+@Suite("SuperGrok 用量池解析（grpc-web）")
+struct GrokCreditsTests {
+  static let fixtureHex = "000000005f0a5d0d0000804012001a00220c08ddb8cbd40610a88b91ed012a0c08ddadf0d40610a88b91ed013a07080715000040403a070805150000803f421e0802120c08ddb8cbd40610a88b91ed011a0c08ddadf0d40610a88b91ed01580162006801800000000f677270632d7374617475733a300d0a"
+  static var fixture: Data {
+    var d = Data(); var idx = fixtureHex.startIndex
+    while idx < fixtureHex.endIndex {
+      let next = fixtureHex.index(idx, offsetBy: 2)
+      d.append(UInt8(fixtureHex[idx..<next], radix: 16)!); idx = next
+    }
+    return d
+  }
+
+  @Test func decodesWeeklyPoolAndProducts() {
+    let snap = APIKeyBalanceSource.grokCreditsSnapshot(data: Self.fixture, now: Date())
     #expect(snap.isAvailable)
-    #expect(snap.windows.map(\.label) == ["专家", "快速"])
-    #expect(snap.windows[0].window.remainingPercent == 70)
-    #expect(snap.windows[0].window.resetsAt == now.addingTimeInterval(7200))
-    #expect(snap.windows[0].window.inferredReset)
-    #expect(snap.windows[1].window.remainingPercent == 75)
+    #expect(snap.windows.map(\.label) == ["周·总", "应用构建器", "Imagine"])
+    #expect(snap.windows[0].window.usedPercent == 4)
+    #expect(snap.windows[1].window.usedPercent == 3)
+    #expect(snap.windows[2].window.usedPercent == 1)
+    #expect(snap.windows[2].window.remainingPercent == 99)
+    #expect(snap.windows[0].window.resetsAt == Date(timeIntervalSince1970: 1_788_614_365))
+    #expect(snap.sourceName.contains("周用量池"))
   }
 
-  @Test func parsesFlatShape() {
-    let snap = APIKeyBalanceSource.grokSnapshot(from: ["remainingQueries": 12, "totalQueries": 20, "windowSizeSeconds": 7200], now: Date())
-    #expect(snap.windows.count == 1)
-    #expect(snap.windows[0].window.remainingPercent == 60)
-  }
-
-  @Test func unauthenticatedIsError() {
-    let snap = APIKeyBalanceSource.grokSnapshot(from: ["code": 16, "message": "No credentials presented."], now: Date())
+  @Test func trailerOnlyIsAnError() {
+    let snap = APIKeyBalanceSource.grokCreditsSnapshot(data: Data([0x80, 0, 0, 0, 0]), now: Date())
     #expect(!snap.isAvailable)
-    #expect(snap.errorMessage?.contains("No credentials") == true)
+    #expect(snap.windows.isEmpty)
   }
 
-  @Test func cookieHeaderShapes() {
-    #expect(APIKeyBalanceSource.grokCookieHeader(" abc123 ") == "sso=abc123; sso-rw=abc123")
-    #expect(APIKeyBalanceSource.grokCookieHeader("sso=abc; other=1") == "sso=abc; other=1")
+  @Test func grokEndpointIsTheBillingRPC() {
+    #expect(APIKeyBalanceSource.endpoint(for: .grok)?.path == "/grok_api_v2.GrokBuildBilling/GetGrokCreditsConfig")
   }
 }

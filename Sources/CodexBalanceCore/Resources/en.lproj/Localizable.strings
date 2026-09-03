@@ -44,3 +44,4 @@
 
 "接口返回里没有额度字段" = "No quota field in response";
 "接口返回：%@" = "API said: %@";
+"周·总" = "Week·All";\n"月·总" = "Month·All";\n"应用构建器" = "App Builder";\n"插件" = "Plugins";\n"聊天" = "Chat";\n"语音" = "Voice";\n"任务" = "Tasks";\n
