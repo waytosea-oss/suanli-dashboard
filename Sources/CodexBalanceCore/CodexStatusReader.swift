@@ -6,6 +6,9 @@ import Darwin
 private struct ParsedFileCache {
   var modified: Date
   var fileSize: Int
+  /// 已解析到的字节位置（最后一个完整行的换行符之后）。Codex 可能先写半行，
+  /// 增量解析必须从这里接着读，而不是从上次的文件末尾
+  var parsedOffset: Int = 0
   var pendingScores: [TokenUsageCategory: Int]
   var pendingProjectName: String
   var pendingProjectPath: String
@@ -160,7 +163,7 @@ public final class CodexStatusReader: @unchecked Sendable {
 
   public func read(now: Date = Date()) throws -> CodexStatus {
     workspaceRootLabels = loadWorkspaceRootLabels()
-    let files = listJSONLFiles()
+    let files = listJSONLFiles(now: now)
     let activePaths = Set(files.map(\.path))
     eventCache = eventCache.filter { activePaths.contains($0.key) }
     let events = files
@@ -209,7 +212,7 @@ public final class CodexStatusReader: @unchecked Sendable {
     tailBytes: Int = 768 * 1024
   ) throws -> CodexStatus {
     workspaceRootLabels = loadWorkspaceRootLabels()
-    let files = Array(listJSONLFiles().prefix(fileLimit))
+    let files = Array(listJSONLFiles(now: now).prefix(fileLimit))
     let events = files
       .flatMap { parseRecentEvents(in: $0, now: now, tailBytes: tailBytes) }
       .sorted { $0.timestamp < $1.timestamp }
@@ -285,7 +288,10 @@ public final class CodexStatusReader: @unchecked Sendable {
     return false
   }
 
-  private func listJSONLFiles() -> [URL] {
+  /// 只看最近 45 天的会话文件
+  static func historyCutoff(now: Date = Date()) -> Date { now.addingTimeInterval(-45 * 24 * 3600) }
+
+  private func listJSONLFiles(now: Date = Date()) -> [URL] {
     var files: [(url: URL, modified: Date)] = []
     var seenPaths = Set<String>()
 
@@ -308,7 +314,11 @@ public final class CodexStatusReader: @unchecked Sendable {
         else {
           continue
         }
-        files.append((url, values.contentModificationDate ?? .distantPast))
+        let modified = values.contentModificationDate ?? .distantPast
+        // 45 天前的会话对"现在还剩多少"和本月 token 统计都没有贡献，不再解析：
+        // 用户机器上曾累积 8.5 GB 日志（单文件 1.5 GB），全量解析一次就是 1.5 GB 内存 + 数十秒 CPU
+        if modified < Self.historyCutoff(now: now) { continue }
+        files.append((url, modified))
       }
     }
 
@@ -364,13 +374,13 @@ public final class CodexStatusReader: @unchecked Sendable {
       return cached.events
     }
 
-    let isActiveToday = Calendar.current.isDate(modified, inSameDayAs: now)
+    // 文件只增不改（Codex 只追加），所以不管是不是今天的文件，都只读新追加的那一段。
+    // 以前把"今天的文件"排除在增量之外，导致正在进行的会话（可达数百 MB）每 3 分钟整文件重读一次。
     if let cached = eventCache[cacheKey],
-       !isActiveToday,
        fileSize >= cached.fileSize,
-       let appendedText = readText(in: file, fromOffset: cached.fileSize) {
+       let appended = readCompleteLines(in: file, fromOffset: cached.parsedOffset) {
       let parsed = parseEventLines(
-        appendedText,
+        appended.text,
         file: file,
         initialScores: cached.pendingScores,
         initialProjectName: cached.pendingProjectName,
@@ -381,6 +391,7 @@ public final class CodexStatusReader: @unchecked Sendable {
       eventCache[cacheKey] = ParsedFileCache(
         modified: modified,
         fileSize: fileSize,
+        parsedOffset: cached.parsedOffset + appended.consumedBytes,
         pendingScores: parsed.pendingScores,
         pendingProjectName: parsed.pendingProjectName,
         pendingProjectPath: parsed.pendingProjectPath,
@@ -389,22 +400,20 @@ public final class CodexStatusReader: @unchecked Sendable {
       return nextEvents
     }
 
-    guard let text = try? String(contentsOf: file, encoding: .utf8) else {
-      return []
-    }
-
     let fallbackProjectName = projectName(fromPath: file.deletingPathExtension().lastPathComponent)
-    let parsed = parseEventLines(
-      text,
-      file: file,
+    guard let parsed = parseWholeFileStreaming(
+      file,
       initialScores: emptyCategoryScores(),
       initialProjectName: fallbackProjectName,
       initialProjectPath: file.path
-    )
+    ) else {
+      return []
+    }
 
     eventCache[cacheKey] = ParsedFileCache(
       modified: modified,
       fileSize: fileSize,
+      parsedOffset: parsed.parsedOffset,
       pendingScores: parsed.pendingScores,
       pendingProjectName: parsed.pendingProjectName,
       pendingProjectPath: parsed.pendingProjectPath,
@@ -492,6 +501,85 @@ public final class CodexStatusReader: @unchecked Sendable {
     }
 
     return (events, contextScores, currentProjectName, currentProjectPath)
+  }
+
+  /// 分块流式解析整个文件：每次只在内存里放 8 MB，按整行切，行间状态（token 分类累计、项目名）跨块传递。
+  /// 之前是 String(contentsOf:) 一次读全文再 split，1.5 GB 的文件直接把内存顶到 1.5 GB。
+  private func parseWholeFileStreaming(
+    _ file: URL,
+    initialScores: [TokenUsageCategory: Int],
+    initialProjectName: String,
+    initialProjectPath: String
+  ) -> (
+    events: [RateLimitEvent],
+    pendingScores: [TokenUsageCategory: Int],
+    pendingProjectName: String,
+    pendingProjectPath: String,
+    parsedOffset: Int
+  )? {
+    guard let handle = try? FileHandle(forReadingFrom: file) else { return nil }
+    defer { try? handle.close() }
+    let chunkSize = 8 * 1024 * 1024
+    var events: [RateLimitEvent] = []
+    var scores = initialScores
+    var projectName = initialProjectName
+    var projectPath = initialProjectPath
+    var carry = Data()
+    var consumed = 0
+    while true {
+      let chunk = (try? handle.read(upToCount: chunkSize)) ?? Data()
+      if chunk.isEmpty { break }
+      carry.append(chunk)
+      // 只解析到最后一个换行符，剩下的半行留到下一块
+      guard let lastNewline = carry.lastIndex(of: 0x0A) else { continue }
+      let complete = carry.subdata(in: carry.startIndex..<(lastNewline + 1))
+      consumed += complete.count
+      carry = Data(carry.suffix(from: lastNewline + 1))
+      if let text = String(data: complete, encoding: .utf8) {
+        let parsed = parseEventLines(text, file: file, initialScores: scores,
+                                     initialProjectName: projectName, initialProjectPath: projectPath)
+        events.append(contentsOf: parsed.events)
+        scores = parsed.pendingScores; projectName = parsed.pendingProjectName; projectPath = parsed.pendingProjectPath
+      }
+    }
+    // 末尾没有换行的一行：如果已经是完整 JSON（以 } 结尾）就解析掉，否则留给下次增量（Codex 可能还在写）
+    if Self.looksLikeCompleteLine(carry), let text = String(data: carry, encoding: .utf8) {
+      let parsed = parseEventLines(text, file: file, initialScores: scores,
+                                   initialProjectName: projectName, initialProjectPath: projectPath)
+      events.append(contentsOf: parsed.events)
+      scores = parsed.pendingScores; projectName = parsed.pendingProjectName; projectPath = parsed.pendingProjectPath
+      consumed += carry.count
+    }
+    return (events, scores, projectName, projectPath, consumed)
+  }
+
+  /// 没有换行结尾的最后一行是否已经写完：JSONL 每行是一个对象，写完必以 } 结尾（允许尾随空白）
+  private static func looksLikeCompleteLine(_ data: Data) -> Bool {
+    guard let last = data.last(where: { $0 != 0x20 && $0 != 0x0D && $0 != 0x09 }) else { return false }
+    return last == 0x7D
+  }
+
+  /// 从 offset 起读到文件末尾，只返回到最后一个换行符为止的完整行，以及消费掉的字节数
+  private func readCompleteLines(in file: URL, fromOffset offset: Int) -> (text: String, consumedBytes: Int)? {
+    do {
+      let handle = try FileHandle(forReadingFrom: file)
+      defer { try? handle.close() }
+      try handle.seek(toOffset: UInt64(max(0, offset)))
+      guard let data = try handle.readToEnd(), !data.isEmpty else { return ("", 0) }
+      let cut: Int
+      if let lastNewline = data.lastIndex(of: 0x0A) {
+        let tail = data.suffix(from: lastNewline + 1)
+        cut = Self.looksLikeCompleteLine(tail) ? data.count : (lastNewline + 1 - data.startIndex)
+      } else {
+        cut = Self.looksLikeCompleteLine(data) ? data.count : 0
+      }
+      guard cut > 0 else { return ("", 0) }
+      let complete = data.subdata(in: data.startIndex..<(data.startIndex + cut))
+      guard let text = String(data: complete, encoding: .utf8) else { return nil }
+      return (text, complete.count)
+    } catch {
+      return nil
+    }
   }
 
   private func readText(in file: URL, fromOffset offset: Int) -> String? {
