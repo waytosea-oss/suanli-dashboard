@@ -71,7 +71,7 @@ a:focus-visible{outline:2px solid var(--claude);outline-offset:2px}
 <div class="wrap"><table>
 <tr><th>形态</th><th>平台</th><th>环里是什么</th><th>数据从哪来</th></tr>
 <tr><td>本机登录态</td><td>Codex、Claude Code</td><td>5 小时 / 7 天等窗口的剩余百分比</td><td>本机 CLI 登录态 + 官方额度接口</td></tr>
-<tr><td>API Key 拉订阅窗口</td><td>GLM Coding Plan、SuperGrok</td><td>剩余百分比（GLM：5 时 / 周 / MCP；Grok：2 小时查询次数）</td><td><code>open.bigmodel.cn/api/monitor/usage/quota/limit</code>、<code>grok.com/rest/rate-limits</code></td></tr>
+<tr><td>API Key 拉订阅窗口</td><td>GLM Coding Plan、SuperGrok</td><td>剩余百分比（GLM：5 时 / 周 / MCP；Grok：每周用量池，周·总 + Imagine / 应用构建器分项）</td><td><code>open.bigmodel.cn/api/monitor/usage/quota/limit</code>、<code>grok.com/grok_api_v2.GrokBuildBilling/GetGrokCreditsConfig</code>（grpc-web）</td></tr>
 <tr><td>API Key 拉账户余额</td><td>DeepSeek、Kimi、SiliconFlow、OpenRouter</td><td>余额金额；填了「满额基准」才画比例</td><td>各家官方余额接口</td></tr>
 </table></div>
 <p>没有公开用量或余额接口的平台不接：拿不到真数据就不编数字。OpenAI API 和 Anthropic API 只有组织管理员的账单接口，给的是花了多少钱，不是还剩多少配额，所以也没接。</p>
@@ -96,7 +96,6 @@ cp -R dist/算力码表.app ~/Applications/</pre>
 
 <h2>这次没做完的</h2>
 <ul>
-<li><b>Grok 的每周用量池。</b>grok.com 设置里的「用量」页按 Imagine、应用构建器等分项显示百分比，那是一个 Connect-RPC 接口，服务名藏在前端懒加载代码里，这次没有抓到。码表现在显示的是 <code>rate-limits</code> 接口给的 2 小时查询次数，和网页的周用量不是同一个数。</li>
 <li><b>其他语言。</b>新增文案只补了英文，其余八种语言回落中文。</li>
 <li><b>真 Key 验证。</b>GLM、Grok 用作者自己的账号跑过；DeepSeek、Kimi、SiliconFlow、OpenRouter 的解析器只有单元测试（共 40 个测试全过）。</li>
 </ul>
