@@ -339,6 +339,14 @@ final class DashboardStore: ObservableObject {
       applyWindowVisibility()
     }
   }
+  /// Touch Bar 常驻开着时，收起后浮窗默认隐身（数字在 Touch Bar 上看）。
+  /// 有人会以为码表"不见了"，这个开关让浮窗在收起后也留在屏幕上。
+  @Published var floatingStaysVisible: Bool {
+    didSet {
+      UserDefaults.standard.set(floatingStaysVisible, forKey: "floatingStaysVisible")
+      applyWindowVisibility()
+    }
+  }
 
   /// Touch Bar 常驻开启后，折叠态浮窗自动隐身（点 Touch Bar 项唤出展开面板）。
   /// 用 alpha+忽略鼠标而不是 orderOut，保证 SwiftUI 视图继续活着、定时刷新不中断。
@@ -364,7 +372,7 @@ final class DashboardStore: ObservableObject {
 
   private func applyWindowVisibility() {
     guard let window = NSApp.windows.first(where: { $0.title == "算力码表" }) else { return }
-    let shouldHide = touchBarEnabled && isCompact && !clamshellActive
+    let shouldHide = touchBarEnabled && isCompact && !clamshellActive && !floatingStaysVisible
     window.alphaValue = shouldHide ? 0 : 1
     window.ignoresMouseEvents = shouldHide
     if !shouldHide {
@@ -537,6 +545,7 @@ final class DashboardStore: ObservableObject {
     compactStyle = storedStyle.flatMap(CompactStyle.init(rawValue:)) ?? .rings
     autoDodgeEnabled = UserDefaults.standard.object(forKey: "autoDodgeEnabled") as? Bool ?? false
     touchBarEnabled = UserDefaults.standard.object(forKey: "touchBarEnabled") as? Bool ?? false
+    floatingStaysVisible = UserDefaults.standard.object(forKey: "floatingStaysVisible") as? Bool ?? false
     resetProgressAscending = UserDefaults.standard.object(forKey: "resetProgressAscending") as? Bool ?? false
     let storedTouchBarStyle = UserDefaults.standard.string(forKey: "touchBarStyle")
     touchBarStyle = storedTouchBarStyle.flatMap(TouchBarPanelStyle.init(rawValue:)) ?? .barsQuad

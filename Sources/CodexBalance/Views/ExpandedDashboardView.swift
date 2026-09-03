@@ -893,6 +893,37 @@ struct ExpandedDashboardView: View {
             )
         )
         .disabled(!store.touchBarSupported)
+
+        if store.touchBarEnabled, store.touchBarSupported {
+          Button {
+            store.floatingStaysVisible.toggle()
+          } label: {
+            HStack(alignment: .center, spacing: 12) {
+              Image(systemName: store.floatingStaysVisible ? "checkmark.circle.fill" : "circle")
+                .font(.system(size: 17, weight: .heavy))
+                .foregroundStyle(store.floatingStaysVisible ? palette.weekly : DashboardColors.subtleText)
+                .frame(width: 20)
+              VStack(alignment: .leading, spacing: 3) {
+                Text("收起后浮窗仍留在屏幕上".l10n)
+                  .font(.system(size: 12.5, weight: .heavy))
+                  .foregroundStyle(DashboardColors.text)
+                Text("不勾：收起后浮窗隐身，只看 Touch Bar，点 Touch Bar 上的码表唤回；勾上：浮窗和 Touch Bar 同时显示".l10n)
+                  .font(.system(size: 11, weight: .semibold))
+                  .foregroundStyle(DashboardColors.subtleText)
+                  .fixedSize(horizontal: false, vertical: true)
+              }
+              Spacer(minLength: 8)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(
+              RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.white.opacity(0.04))
+                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(Color.white.opacity(0.08), lineWidth: 1))
+            )
+          }
+          .buttonStyle(.plain)
+        }
         .opacity(store.touchBarSupported ? 1 : 0.5)
         .help("在 Touch Bar Control Strip 常驻显示两个工具的余额".l10n)
 

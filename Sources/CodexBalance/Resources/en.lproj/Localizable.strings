@@ -217,3 +217,5 @@
 "右上角头像 → Keys →「Create Key」" = "Avatar (top right) → Keys → Create Key";
 "建议给 Key 设一个 Credit limit，这样环会按上限画比例；不设就只显示已消耗" = "Set a credit limit on the key so the ring shows a ratio; without one only spend is shown";
 "复制 sk-or- 开头的 Key，贴进「API Key」栏 → 保存" = "Copy the key starting with sk-or-, paste into API Key → Save";
+"收起后浮窗仍留在屏幕上" = "Keep the floating widget after collapsing";
+"不勾：收起后浮窗隐身，只看 Touch Bar，点 Touch Bar 上的码表唤回；勾上：浮窗和 Touch Bar 同时显示" = "Off: the widget hides when collapsed and lives on the Touch Bar (tap it there to bring it back). On: show both";
