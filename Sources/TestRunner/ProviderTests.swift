@@ -255,6 +255,17 @@ struct GrokCreditsTests {
     #expect(snap.sourceName.contains("周用量池"))
   }
 
+  @Test func zeroUsageWeekIsHundredPercentRemaining() {
+    // 真实响应：新周刚开始，用量 0%，接口省略了 credit_usage_percent 与 product_usage
+    let hex = "00000000480a4612001a00220c08ddadf0d40610a88b91ed012a0c08dda295d50610a88b91ed01421e0802120c08ddadf0d40610a88b91ed011a0c08dda295d50610a88b91ed01580162006801800000000f677270632d7374617475733a300d0a"
+    var d = Data(); var i = hex.startIndex
+    while i < hex.endIndex { let n = hex.index(i, offsetBy: 2); d.append(UInt8(hex[i..<n], radix: 16)!); i = n }
+    let snap = APIKeyBalanceSource.grokCreditsSnapshot(data: d, now: Date())
+    #expect(snap.isAvailable)
+    #expect(snap.windows.map(\.label) == ["周·总"])
+    #expect(snap.windows[0].window.remainingPercent == 100)
+  }
+
   @Test func trailerOnlyIsAnError() {
     let snap = APIKeyBalanceSource.grokCreditsSnapshot(data: Data([0x80, 0, 0, 0, 0]), now: Date())
     #expect(!snap.isAvailable)

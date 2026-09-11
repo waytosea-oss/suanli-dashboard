@@ -579,9 +579,8 @@ extension APIKeyBalanceSource {
       default: break
       }
     }
-    guard let totalUsed else {
-      return ProviderSnapshot(provider: .grok, fetchedAt: now, sourceName: name, errorMessage: "接口返回里没有额度字段".coreL10n)
-    }
+    // protobuf 省略零值：新计费周刚开始时 credit_usage_percent 和 product_usage 都不发，等于 0%，不是没数据
+    let totalUsed = totalUsed ?? 0
     let weekly = periodType != 1
     let minutes: Double = weekly ? 7 * 24 * 60 : 30 * 24 * 60
     func window(_ label: String, used: Double) -> LabeledWindow {
