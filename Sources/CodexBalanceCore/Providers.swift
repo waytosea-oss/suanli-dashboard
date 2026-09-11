@@ -580,14 +580,14 @@ extension APIKeyBalanceSource {
       }
     }
     // protobuf 省略零值：新计费周刚开始时 credit_usage_percent 和 product_usage 都不发，等于 0%，不是没数据
-    let totalUsed = totalUsed ?? 0
+    let used = totalUsed ?? 0
     let weekly = periodType != 1
     let minutes: Double = weekly ? 7 * 24 * 60 : 30 * 24 * 60
     func window(_ label: String, used: Double) -> LabeledWindow {
       let u = min(100, max(0, used))
       return LabeledWindow(label: label, window: LimitWindow(usedPercent: u, remainingPercent: 100 - u, windowMinutes: minutes, resetsAt: periodEnd), isHourScale: false)
     }
-    var windows = [window(weekly ? "周·总" : "月·总", used: totalUsed)]
+    var windows = [window(weekly ? "周·总" : "月·总", used: used)]
     // 分项按已用从高到低，和网页「用量」页一致
     for (product, pct) in products.sorted(by: { $0.1 > $1.1 }) {
       windows.append(window(grokProductName(product), used: pct))
