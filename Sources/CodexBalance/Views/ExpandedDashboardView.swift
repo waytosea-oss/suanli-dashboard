@@ -164,6 +164,7 @@ struct ExpandedDashboardView: View {
 
   private var claudeFreshnessText: String {
     guard let event = store.claudeStatus?.main else {
+      if let reason = ClaudeStatusReader.lastFailureReason { return "暂无数据 · ".l10n + reason }
       return "暂无数据 · 本机未读到 Claude 余额来源".l10n
     }
     return L("实时读取 %@ · %@", event.sourceName, BalanceFormatters.dateTime(event.timestamp))

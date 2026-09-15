@@ -252,7 +252,8 @@ final class DashboardStore: ObservableObject {
       case .codex:
         return DisplayTool(id: .codex, event: status?.main, unavailable: status?.main == nil)
       case .claude:
-        return DisplayTool(id: .claude, event: claudeStatus?.main, unavailable: !claudeBalanceAvailable)
+        return DisplayTool(id: .claude, event: claudeStatus?.main, unavailable: !claudeBalanceAvailable,
+                           errorMessage: claudeBalanceAvailable ? nil : ClaudeStatusReader.lastFailureReason)
       default:
         let snapshot = providerSnapshots[provider]
         let event: RateLimitEvent? = snapshot.flatMap { snap in

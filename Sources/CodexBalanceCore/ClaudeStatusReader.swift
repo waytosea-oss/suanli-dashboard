@@ -7,6 +7,9 @@ import Foundation
 ///   调用官方 usage 接口；凭据不存在或接口失败时返回 nil（UI 显示「暂无数据」灰环），绝不发起登录。
 /// - 官方按天总量：暂无可靠来源，恒为 nil。
 public final class ClaudeStatusReader: @unchecked Sendable {
+  /// 最近一次拿不到 Claude 凭据的原因（nil = 正常）
+  public static var lastFailureReason: String? { ClaudeOAuthUsageSource.lastFailureReason }
+
   private struct ParsedClaudeFile {
     var modified: Date
     var fileSize: Int
@@ -575,6 +578,13 @@ final class ClaudeOAuthUsageSource: @unchecked Sendable {
     }
   }
 
+  /// 最近一次拿不到 access token 的原因（给界面显示，不再只灰着）。nil = 上次成功。
+  public static var lastFailureReason: String? {
+    get { failureReasonBox.value }
+  }
+  private static let failureReasonBox = ClaudeReasonBox()
+  private static func noteFailure(_ reason: String?) { failureReasonBox.set(reason) }
+
   private func readAccessToken() -> String? {
     // 凭据来源只有两个：自有缓存（续期在此滚动）与 Claude 的明文凭据文件（如存在）。
     // 钥匙串访问已从本程序中彻底移除——SecItemCopyMatching 会触发系统授权弹框，
@@ -582,31 +592,47 @@ final class ClaudeOAuthUsageSource: @unchecked Sendable {
     // （修复Claude连接.command，用 Apple 签名的 security 工具读取，永不弹框）。
     let cached = readRefreshCache()
     if let cached, cached.isAccessTokenValid {
+      Self.noteFailure(nil)
       return cached.accessToken
     }
+    var chainDead = false
     if let refreshToken = cached?.refreshToken {
       switch renewAccessTokenDetailed(refreshToken: refreshToken) {
       case .success(let renewed):
         writeRefreshCache(renewed)
+        Self.noteFailure(nil)
         return renewed.accessToken
       case .networkFailure:
+        Self.noteFailure("网络暂时不可用，稍后自动重试".coreL10n)
         return nil // 断网/超时：与凭据无关，等下轮重试
       case .authRejected:
-        break // 链死，试凭据文件
+        chainDead = true // 链死，试凭据文件
       }
     }
     // 明文凭据文件（部分安装形态存在；纯文件读取，无任何系统弹框）
+    let file = claudeHome.appendingPathComponent(".credentials.json")
     if let credentials = readCredentialsFileCredentials() {
       if credentials.isAccessTokenValid {
         writeRefreshCache(credentials)
+        Self.noteFailure(nil)
         return credentials.accessToken
       }
       if let refreshToken = credentials.refreshToken,
          refreshToken != cached?.refreshToken,
          let renewed = renewAccessToken(refreshToken: refreshToken) {
         writeRefreshCache(renewed)
+        Self.noteFailure(nil)
         return renewed.accessToken
       }
+      Self.noteFailure("Claude 凭据已失效：在终端运行 claude 重新登录，再双击「修复Claude连接.command」".coreL10n)
+      return nil
+    }
+    if fileManager.fileExists(atPath: file.path) {
+      Self.noteFailure("Claude 凭据文件无法解析：双击「修复Claude连接.command」重建".coreL10n)
+    } else if chainDead {
+      Self.noteFailure("Claude 授权已过期：双击「修复Claude连接.command」，或在终端运行 claude 重新登录".coreL10n)
+    } else {
+      Self.noteFailure("未找到 Claude 登录凭据：双击「修复Claude连接.command」把凭据抄给码表".coreL10n)
     }
     return nil
   }
@@ -845,4 +871,12 @@ private final class ClaudeRenewThrottle: @unchecked Sendable {
       consecutiveFailures = min(consecutiveFailures + 1, 8)
     }
   }
+}
+
+
+private final class ClaudeReasonBox: @unchecked Sendable {
+  private let lock = NSLock()
+  private var storage: String?
+  var value: String? { lock.lock(); defer { lock.unlock() }; return storage }
+  func set(_ v: String?) { lock.lock(); storage = v; lock.unlock() }
 }
