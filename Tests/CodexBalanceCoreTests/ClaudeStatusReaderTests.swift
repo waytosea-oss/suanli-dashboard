@@ -5,6 +5,14 @@ import Testing
 
 @Suite("ClaudeStatusReader")
 struct ClaudeStatusReaderTests {
+  @Test func rateLimitingIsNotReportedAsNetworkFailure() {
+    let limited = ClaudeOAuthUsageSource.requestFailureReason(statusCode: 429)
+    #expect(limited.contains("429"))
+    #expect(limited != ClaudeOAuthUsageSource.requestFailureReason(statusCode: 0))
+    #expect(limited != ClaudeOAuthUsageSource.requestFailureReason(statusCode: 401))
+    #expect(limited != ClaudeOAuthUsageSource.requestFailureReason(statusCode: 503))
+  }
+
   private func makeClaudeHome() throws -> URL {
     let root = FileManager.default.temporaryDirectory
       .appendingPathComponent("claude-reader-tests-\(UUID().uuidString)")
@@ -120,4 +128,244 @@ struct SyncStoreToolNamingTests {
     let text = try String(contentsOf: written, encoding: .utf8)
     #expect(text.contains("\"app\" : \"claude\""))
   }
+}
+
+@Suite("Claude OAuth recovery", .serialized)
+struct ClaudeOAuthRecoveryTests {
+  private final class State: @unchecked Sendable {
+    var keychain: Data?
+    var requests: [URLRequest] = []
+  }
+
+  private func oauth(_ token: String, expiry: TimeInterval, refresh: String = "refresh-new") throws -> Data {
+    try JSONSerialization.data(withJSONObject: ["claudeAiOauth": [
+      "accessToken": token, "refreshToken": refresh, "expiresAt": expiry * 1000
+    ]])
+  }
+
+  private func fixture(cachedToken: String = "old", expiry: TimeInterval = 0) throws -> (URL, URL, State, URLSession) {
+    let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+    let cache = home.appendingPathComponent("cache.json")
+    try JSONSerialization.data(withJSONObject: ["accessToken": cachedToken, "refreshToken": "refresh-old",
+                                                "expiresAtEpoch": expiry]).write(to: cache)
+    let config = URLSessionConfiguration.ephemeral
+    config.protocolClasses = [ClaudeMockProtocol.self]
+    return (home, cache, State(), URLSession(configuration: config))
+  }
+
+  private static var usage: [String: Any] { ["five_hour": ["utilization": 21], "seven_day": ["utilization": 2]] }
+
+  @Test func automaticallyImportsNewLoginBeforeRenewingExpiredCache() throws {
+    let (home, cache, state, session) = try fixture()
+    defer { try? FileManager.default.removeItem(at: home); session.invalidateAndCancel() }
+    state.keychain = try oauth("fresh-login", expiry: Date().timeIntervalSince1970 + 3600)
+    ClaudeMockProtocol.handler = { request in
+      state.requests.append(request)
+      #expect(request.url?.path == "/api/oauth/usage")
+      #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer fresh-login")
+      return (200, [:], Self.usage)
+    }
+    let reader = ClaudeOAuthUsageSource(claudeHome: home, fileManager: .default, cacheURL: cache,
+                                       session: session, keychainRead: { state.keychain })
+    #expect(reader.freshRateLimitEvents(now: Date()).first?.primary?.remainingPercent == 79)
+    #expect(state.requests.count == 1)
+    let saved = try JSONSerialization.jsonObject(with: Data(contentsOf: cache)) as! [String: Any]
+    #expect(saved["accessToken"] as? String == "fresh-login")
+    let permissions = try FileManager.default.attributesOfItem(atPath: cache.path)[.posixPermissions] as? Int
+    #expect(permissions == 0o600)
+  }
+
+  @Test func emptyOrOlderKeychainDoesNotOverwriteRenewedCache() throws {
+    let now = Date()
+    let (home, cache, state, session) = try fixture(cachedToken: "new-cache", expiry: now.timeIntervalSince1970 + 7200)
+    defer { try? FileManager.default.removeItem(at: home); session.invalidateAndCancel() }
+    state.keychain = try oauth("older-keychain", expiry: now.timeIntervalSince1970 + 3600)
+    ClaudeMockProtocol.handler = { request in
+      state.requests.append(request)
+      #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer new-cache")
+      return (200, [:], Self.usage)
+    }
+    let reader = ClaudeOAuthUsageSource(claudeHome: home, fileManager: .default, cacheURL: cache,
+                                       session: session, keychainRead: { state.keychain })
+    #expect(!reader.freshRateLimitEvents(now: now).isEmpty)
+    state.keychain = try oauth("", expiry: 0, refresh: "")
+    #expect(!reader.freshRateLimitEvents(now: now.addingTimeInterval(241)).isEmpty)
+    #expect(state.requests.count == 2)
+  }
+
+  @Test func credentialsFileIsUsedBeforeOldRefreshToken() throws {
+    let (home, cache, state, session) = try fixture()
+    defer { try? FileManager.default.removeItem(at: home); session.invalidateAndCancel() }
+    try oauth("file-login", expiry: Date().timeIntervalSince1970 + 3600)
+      .write(to: home.appendingPathComponent(".credentials.json"))
+    ClaudeMockProtocol.handler = { request in
+      state.requests.append(request)
+      #expect(request.url?.path == "/api/oauth/usage")
+      #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer file-login")
+      return (200, [:], Self.usage)
+    }
+    let reader = ClaudeOAuthUsageSource(claudeHome: home, fileManager: .default, cacheURL: cache,
+                                       session: session, keychainRead: { nil })
+    #expect(!reader.freshRateLimitEvents(now: Date()).isEmpty)
+    #expect(state.requests.count == 1)
+  }
+
+  @Test func unauthorizedUsageResyncsNewLoginWithoutRestart() throws {
+    let now = Date()
+    let (home, cache, state, session) = try fixture(expiry: now.timeIntervalSince1970 + 3600)
+    defer { try? FileManager.default.removeItem(at: home); session.invalidateAndCancel() }
+    let newLogin = try oauth("replacement", expiry: now.timeIntervalSince1970 + 7200)
+    ClaudeMockProtocol.handler = { request in
+      state.requests.append(request)
+      if state.requests.count == 1 {
+        state.keychain = newLogin
+        return (401, [:], [:])
+      }
+      #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer replacement")
+      return (200, [:], Self.usage)
+    }
+    let reader = ClaudeOAuthUsageSource(claudeHome: home, fileManager: .default, cacheURL: cache,
+                                       session: session, keychainRead: { state.keychain })
+    #expect(!reader.freshRateLimitEvents(now: now).isEmpty)
+    #expect(state.requests.count == 2)
+  }
+
+  @Test func expiredTokenRenewsAndSavesRotatedRefreshToken() throws {
+    let (home, cache, state, session) = try fixture()
+    defer { try? FileManager.default.removeItem(at: home); session.invalidateAndCancel() }
+    ClaudeMockProtocol.handler = { request in
+      state.requests.append(request)
+      if request.url?.path == "/v1/oauth/token" {
+        return (200, [:], ["access_token": "renewed", "refresh_token": "rotated", "expires_in": 3600])
+      }
+      #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer renewed")
+      return (200, [:], Self.usage)
+    }
+    let reader = ClaudeOAuthUsageSource(claudeHome: home, fileManager: .default, cacheURL: cache,
+                                       session: session, keychainRead: { nil })
+    #expect(!reader.freshRateLimitEvents(now: Date()).isEmpty)
+    let saved = try JSONSerialization.jsonObject(with: Data(contentsOf: cache)) as! [String: Any]
+    #expect(saved["refreshToken"] as? String == "rotated")
+    #expect(state.requests.count == 2)
+  }
+
+  @Test func rateLimitSurvivesRestartAndRespectsRetryAfter() throws {
+    let now = Date()
+    let (home, cache, state, session) = try fixture(expiry: now.timeIntervalSince1970 + 3600)
+    defer { try? FileManager.default.removeItem(at: home); session.invalidateAndCancel() }
+    ClaudeMockProtocol.handler = { request in
+      state.requests.append(request)
+      return (429, ["Retry-After": "900"], [:])
+    }
+    let first = ClaudeOAuthUsageSource(claudeHome: home, fileManager: .default, cacheURL: cache,
+                                      session: session, keychainRead: { nil })
+    #expect(first.freshRateLimitEvents(now: now).isEmpty)
+    let restarted = ClaudeOAuthUsageSource(claudeHome: home, fileManager: .default, cacheURL: cache,
+                                          session: session, keychainRead: { nil })
+    #expect(restarted.freshRateLimitEvents(now: now.addingTimeInterval(600)).isEmpty)
+    #expect(state.requests.count == 1)
+    #expect(ClaudeOAuthUsageSource.lastFailureReason?.contains("429") == true)
+  }
+
+  @Test func loginChangeRecoversAfterRejectedRenewal() throws {
+    let now = Date()
+    let (home, cache, state, session) = try fixture()
+    defer { try? FileManager.default.removeItem(at: home); session.invalidateAndCancel() }
+    ClaudeMockProtocol.handler = { request in
+      state.requests.append(request)
+      return request.url?.path == "/v1/oauth/token" ? (400, [:], [:]) : (200, [:], Self.usage)
+    }
+    let reader = ClaudeOAuthUsageSource(claudeHome: home, fileManager: .default, cacheURL: cache,
+                                       session: session, keychainRead: { state.keychain })
+    #expect(reader.freshRateLimitEvents(now: now).isEmpty)
+    state.keychain = try oauth("new-login", expiry: now.timeIntervalSince1970 + 3600)
+    #expect(!reader.freshRateLimitEvents(now: now.addingTimeInterval(121)).isEmpty)
+    #expect(state.requests.count == 2)
+    #expect(state.requests.last?.value(forHTTPHeaderField: "Authorization") == "Bearer new-login")
+  }
+  @Test func unauthorizedThenRateLimitedKeepsActualRenewalError() throws {
+    let now = Date()
+    let (home, cache, state, session) = try fixture(expiry: now.timeIntervalSince1970 + 3600)
+    defer { try? FileManager.default.removeItem(at: home); session.invalidateAndCancel() }
+    ClaudeMockProtocol.handler = { request in
+      state.requests.append(request)
+      return request.url?.path == "/api/oauth/usage" ? (401, [:], [:]) : (429, ["Retry-After": "600"], [:])
+    }
+    let reader = ClaudeOAuthUsageSource(claudeHome: home, fileManager: .default, cacheURL: cache,
+                                       session: session, keychainRead: { nil })
+    #expect(reader.freshRateLimitEvents(now: now).isEmpty)
+    #expect(state.requests.count == 2)
+    #expect(ClaudeOAuthUsageSource.lastFailureReason?.contains("429") == true)
+  }
+
+  @Test func newRefreshTokenDoesNotInheritRejectedTokenThrottle() throws {
+    let now = Date()
+    let (home, cache, state, session) = try fixture()
+    defer { try? FileManager.default.removeItem(at: home); session.invalidateAndCancel() }
+    ClaudeMockProtocol.handler = { request in
+      state.requests.append(request)
+      if state.requests.count == 1 { return (400, [:], [:]) }
+      if request.url?.path == "/v1/oauth/token" {
+        return (200, [:], ["access_token": "renewed-new-login", "refresh_token": "new-chain", "expires_in": 3600])
+      }
+      return (200, [:], Self.usage)
+    }
+    let reader = ClaudeOAuthUsageSource(claudeHome: home, fileManager: .default, cacheURL: cache,
+                                       session: session, keychainRead: { state.keychain })
+    #expect(reader.freshRateLimitEvents(now: now).isEmpty)
+    state.keychain = try oauth("expired-new-login", expiry: now.timeIntervalSince1970 - 1)
+    #expect(!reader.freshRateLimitEvents(now: now.addingTimeInterval(121)).isEmpty)
+    #expect(state.requests.count == 3)
+  }
+
+  @Test func repeatedUnauthorizedResponseDoesNotLoop() throws {
+    let now = Date()
+    let (home, cache, state, session) = try fixture(expiry: now.timeIntervalSince1970 + 3600)
+    defer { try? FileManager.default.removeItem(at: home); session.invalidateAndCancel() }
+    ClaudeMockProtocol.handler = { request in
+      state.requests.append(request)
+      if request.url?.path == "/v1/oauth/token" {
+        return (200, [:], ["access_token": "also-rejected", "expires_in": 3600])
+      }
+      return (401, [:], [:])
+    }
+    let reader = ClaudeOAuthUsageSource(claudeHome: home, fileManager: .default, cacheURL: cache,
+                                       session: session, keychainRead: { nil })
+    #expect(reader.freshRateLimitEvents(now: now).isEmpty)
+    #expect(state.requests.count == 3)
+    #expect(ClaudeOAuthUsageSource.lastFailureReason?.contains("claude auth login") == true)
+  }
+
+  @Test func temporaryFailureRetainsOnlyRecentSuccessfulUsage() throws {
+    let now = Date()
+    let (home, cache, state, session) = try fixture(expiry: now.timeIntervalSince1970 + 3600)
+    defer { try? FileManager.default.removeItem(at: home); session.invalidateAndCancel() }
+    ClaudeMockProtocol.handler = { request in
+      state.requests.append(request)
+      return state.requests.count == 1 ? (200, [:], Self.usage) : (429, ["Retry-After": "1800"], [:])
+    }
+    let reader = ClaudeOAuthUsageSource(claudeHome: home, fileManager: .default, cacheURL: cache,
+                                       session: session, keychainRead: { nil })
+    #expect(!reader.freshRateLimitEvents(now: now).isEmpty)
+    #expect(!reader.freshRateLimitEvents(now: now.addingTimeInterval(241)).isEmpty)
+    #expect(reader.freshRateLimitEvents(now: now.addingTimeInterval(601)).isEmpty)
+    #expect(state.requests.count == 2)
+  }
+
+}
+
+private final class ClaudeMockProtocol: URLProtocol, @unchecked Sendable {
+  nonisolated(unsafe) static var handler: ((URLRequest) -> (Int, [String: String], [String: Any]))?
+  override class func canInit(with request: URLRequest) -> Bool { true }
+  override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+  override func startLoading() {
+    guard let handler = Self.handler else { return }
+    let (status, headers, object) = handler(request)
+    let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: "HTTP/1.1", headerFields: headers)!
+    client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+    client?.urlProtocol(self, didLoad: try! JSONSerialization.data(withJSONObject: object))
+    client?.urlProtocolDidFinishLoading(self)
+  }
+  override func stopLoading() {}
 }

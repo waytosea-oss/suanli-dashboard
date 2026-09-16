@@ -365,10 +365,30 @@ final class ClaudeOAuthUsageSource: @unchecked Sendable {
   private var cachedAt: Date?
   private var refreshInFlight = false
   private var failedUntil: Date?
+  private var failureCount = 0
+  private var retryAfter: Date?
+  private var rejectedAccessTokens = Set<String>()
+  private let session: URLSession
+  private let cacheURL: URL
+  private let keychainRead: () -> Data?
+  private let renewThrottle = ClaudeRenewThrottle(interval: 300)
 
-  init(claudeHome: URL, fileManager: FileManager) {
+  init(claudeHome: URL, fileManager: FileManager,
+       cacheURL: URL? = nil, session: URLSession = .shared,
+       keychainRead: @escaping () -> Data? = ClaudeKeychainReader.read) {
     self.claudeHome = claudeHome
     self.fileManager = fileManager
+    self.session = session
+    self.keychainRead = keychainRead
+    self.cacheURL = cacheURL ?? fileManager.homeDirectoryForCurrentUser
+      .appendingPathComponent("Library/Application Support/CodexBalanceDashboard/claude-oauth-cache.json")
+    if let data = try? Data(contentsOf: self.cacheURL.appendingPathExtension("retry")),
+       let state = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+       let until = state["until"] as? Double, until > Date().timeIntervalSince1970 {
+      failedUntil = Date(timeIntervalSince1970: until)
+      failureCount = state["failures"] as? Int ?? 1
+      Self.noteFailure(Self.requestFailureReason(statusCode: 429))
+    }
   }
 
   // 余额变化缓慢，且官方 usage 接口对高频请求会 429。
@@ -390,7 +410,7 @@ final class ClaudeOAuthUsageSource: @unchecked Sendable {
       return events
     }
     if refreshInFlight || (failedUntil.map { $0 > now } ?? false) {
-      let events = cachedEvents
+      let events = cachedAt.map { now.timeIntervalSince($0) <= 600 } == true ? cachedEvents : []
       cacheLock.unlock()
       return events
     }
@@ -399,7 +419,7 @@ final class ClaudeOAuthUsageSource: @unchecked Sendable {
 
     let events = fetchEvents(now: now)
     storeFetchResult(events)
-    return events
+    return events.isEmpty ? cachedRateLimitEvents(now: now) : events
   }
 
   func refreshInBackground() {
@@ -426,44 +446,89 @@ final class ClaudeOAuthUsageSource: @unchecked Sendable {
   private func storeFetchResult(_ events: [RateLimitEvent]) {
     cacheLock.lock()
     if events.isEmpty {
-      // 拉取失败（多为 429 限流）：退避 2 分钟再试，期间继续沿用上次成功值
-      failedUntil = Date().addingTimeInterval(120)
+      failureCount = min(failureCount + 1, 6)
+      // Keep checking for a new login every two minutes after auth failures.
+      // Only server rate limits lengthen this polling delay.
+      let delay = retryAfter == nil ? 120 : min(120 * pow(2, Double(failureCount - 1)), 3600)
+      failedUntil = max(Date().addingTimeInterval(delay), retryAfter ?? .distantPast)
+      if retryAfter != nil {
+        let state: [String: Any] = ["until": failedUntil!.timeIntervalSince1970, "failures": failureCount]
+        if let data = try? JSONSerialization.data(withJSONObject: state) {
+          try? data.write(to: cacheURL.appendingPathExtension("retry"), options: .atomic)
+        }
+      }
     } else {
       cachedEvents = events
       cachedAt = Date()
       failedUntil = nil
+      failureCount = 0
+      retryAfter = nil
+      try? fileManager.removeItem(at: cacheURL.appendingPathExtension("retry"))
     }
     refreshInFlight = false
     cacheLock.unlock()
   }
 
   private func fetchEvents(now: Date) -> [RateLimitEvent] {
-    guard let accessToken = readAccessToken(),
-          let url = URL(string: "https://api.anthropic.com/api/oauth/usage")
-    else { return [] }
+    guard let accessToken = readAccessToken() else { return [] }
+    return fetchUsage(accessToken: accessToken, now: now, canRecover: true)
+  }
 
-    var request = URLRequest(url: url)
+  private func fetchUsage(accessToken: String, now: Date, canRecover: Bool) -> [RateLimitEvent] {
+    var request = URLRequest(url: URL(string: "https://api.anthropic.com/api/oauth/usage")!)
     request.httpMethod = "GET"
     request.timeoutInterval = 12
     request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
     request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
     request.setValue("application/json", forHTTPHeaderField: "Accept")
+    let response = perform(request)
+    guard (200..<300).contains(response.status), let object = response.object else {
+      if response.status == 401 {
+        rejectedAccessTokens.insert(accessToken)
+        // A revoked token can still have a future expiry. Resync/renew once, never loop.
+        if canRecover {
+          guard let replacement = readAccessToken() else { return [] }
+          if replacement != accessToken {
+            return fetchUsage(accessToken: replacement, now: now, canRecover: false)
+          }
+        }
+      }
+      Self.noteFailure(Self.requestFailureReason(statusCode: response.status))
+      return []
+    }
+    let result = events(from: object, now: now)
+    Self.noteFailure(result.isEmpty ? "Claude 额度接口返回了无法识别的数据".coreL10n : nil)
+    return result
+  }
 
+  private func perform(_ request: URLRequest) -> ClaudeHTTPResult {
     let semaphore = DispatchSemaphore(value: 0)
-    let box = ClaudeFetchBox()
-    URLSession.shared.dataTask(with: request) { data, response, _ in
-      defer { semaphore.signal() }
-      guard let httpResponse = response as? HTTPURLResponse,
-            (200..<300).contains(httpResponse.statusCode),
-            let data,
-            let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-      else { return }
-      box.set(object)
-    }.resume()
-    _ = semaphore.wait(timeout: .now() + 12)
-
-    guard let object = box.value else { return [] }
-    return events(from: object, now: now)
+    let box = ClaudeHTTPBox()
+    let task = session.dataTask(with: request) { data, response, _ in
+      let http = response as? HTTPURLResponse
+      let object = data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+      box.set(ClaudeHTTPResult(status: http?.statusCode ?? 0, object: object,
+                              retryAfter: http?.value(forHTTPHeaderField: "Retry-After")))
+      semaphore.signal()
+    }
+    task.resume()
+    guard semaphore.wait(timeout: .now() + 13) == .success else {
+      task.cancel()
+      return ClaudeHTTPResult(status: 0)
+    }
+    let response = box.value
+    if response.status == 429 {
+      let now = Date()
+      let formatter = DateFormatter()
+      formatter.locale = Locale(identifier: "en_US_POSIX")
+      formatter.timeZone = TimeZone(secondsFromGMT: 0)
+      formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
+      let serverDate = response.retryAfter.flatMap { value in
+        Double(value).map { now.addingTimeInterval($0) } ?? formatter.date(from: value)
+      }
+      retryAfter = max(now.addingTimeInterval(300), serverDate ?? .distantPast)
+    }
+    return response
   }
 
   private func events(from object: [String: Any], now: Date) -> [RateLimitEvent] {
@@ -586,61 +651,45 @@ final class ClaudeOAuthUsageSource: @unchecked Sendable {
   private static func noteFailure(_ reason: String?) { failureReasonBox.set(reason) }
 
   private func readAccessToken() -> String? {
-    // 凭据来源只有两个：自有缓存（续期在此滚动）与 Claude 的明文凭据文件（如存在）。
-    // 钥匙串访问已从本程序中彻底移除——SecItemCopyMatching 会触发系统授权弹框，
-    // 历史上造成过五次密码风暴。链断裂时的恢复统一走外部脚本
-    // （修复Claude连接.command，用 Apple 签名的 security 工具读取，永不弹框）。
-    let cached = readRefreshCache()
-    if let cached, cached.isAccessTokenValid {
+    // Sync upstream BEFORE consulting the old cache or its renewal backoff.
+    // Empty/expired upstream records never replace a newer, working cache.
+    var credentials = readRefreshCache()
+    let upstream = [readCredentialsFileCredentials(), keychainRead().flatMap(self.credentials(fromCredentialsData:))]
+      .compactMap { $0 }
+      .filter { !rejectedAccessTokens.contains($0.accessToken ?? "") }
+      .sorted { ($0.expiresAt ?? .distantPast) > ($1.expiresAt ?? .distantPast) }
+    if let newest = upstream.first,
+       credentials == nil || rejectedAccessTokens.contains(credentials?.accessToken ?? "")
+        || (newest.expiresAt ?? .distantPast) > (credentials?.expiresAt ?? .distantPast) {
+      credentials = newest
+      writeRefreshCache(newest)
+    }
+    if let credentials, credentials.isAccessTokenValid, !rejectedAccessTokens.contains(credentials.accessToken ?? "") {
       Self.noteFailure(nil)
-      return cached.accessToken
+      return credentials.accessToken
     }
-    var chainDead = false
-    if let refreshToken = cached?.refreshToken {
-      switch renewAccessTokenDetailed(refreshToken: refreshToken) {
-      case .success(let renewed):
-        writeRefreshCache(renewed)
-        Self.noteFailure(nil)
-        return renewed.accessToken
-      case .networkFailure:
-        Self.noteFailure("网络暂时不可用，稍后自动重试".coreL10n)
-        return nil // 断网/超时：与凭据无关，等下轮重试
-      case .authRejected:
-        chainDead = true // 链死，试凭据文件
-      }
-    }
-    // 明文凭据文件（部分安装形态存在；纯文件读取，无任何系统弹框）
-    let file = claudeHome.appendingPathComponent(".credentials.json")
-    if let credentials = readCredentialsFileCredentials() {
-      if credentials.isAccessTokenValid {
-        writeRefreshCache(credentials)
-        Self.noteFailure(nil)
-        return credentials.accessToken
-      }
-      if let refreshToken = credentials.refreshToken,
-         refreshToken != cached?.refreshToken,
-         let renewed = renewAccessToken(refreshToken: refreshToken) {
-        writeRefreshCache(renewed)
-        Self.noteFailure(nil)
-        return renewed.accessToken
-      }
-      Self.noteFailure("Claude 凭据已失效：在终端运行 claude 重新登录，再双击「修复Claude连接.command」".coreL10n)
+    guard let refreshToken = credentials?.refreshToken, !refreshToken.isEmpty else {
+      Self.noteFailure("未找到有效 Claude 登录：请运行 claude auth login，码表会自动同步".coreL10n)
       return nil
     }
-    if fileManager.fileExists(atPath: file.path) {
-      Self.noteFailure("Claude 凭据文件无法解析：双击「修复Claude连接.command」重建".coreL10n)
-    } else if chainDead {
-      Self.noteFailure("Claude 授权已过期：双击「修复Claude连接.command」，或在终端运行 claude 重新登录".coreL10n)
-    } else {
-      Self.noteFailure("未找到 Claude 登录凭据：双击「修复Claude连接.command」把凭据抄给码表".coreL10n)
+    switch renewAccessTokenDetailed(refreshToken: refreshToken) {
+    case .success(let renewed):
+      writeRefreshCache(renewed)
+      Self.noteFailure(nil)
+      return renewed.accessToken
+    case .rateLimited:
+      Self.noteFailure(Self.requestFailureReason(statusCode: 429))
+    case .deferred:
+      break // Preserve the actual failure instead of relabeling backoff as a network error.
+    case .requestFailure(let status):
+      Self.noteFailure(Self.requestFailureReason(statusCode: status))
+    case .authRejected:
+      Self.noteFailure("Claude 授权已失效：请运行 claude auth login，码表会自动同步".coreL10n)
     }
     return nil
   }
 
-  private var refreshCacheURL: URL {
-    fileManager.homeDirectoryForCurrentUser
-      .appendingPathComponent("Library/Application Support/CodexBalanceDashboard/claude-oauth-cache.json")
-  }
+  private var refreshCacheURL: URL { cacheURL }
 
   private func readRefreshCache() -> ClaudeOAuthCredentials? {
     guard let data = try? Data(contentsOf: refreshCacheURL),
@@ -664,33 +713,20 @@ final class ClaudeOAuthUsageSource: @unchecked Sendable {
       withIntermediateDirectories: true
     )
     try? data.write(to: refreshCacheURL, options: [.atomic, .completeFileProtection])
+    try? fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: refreshCacheURL.path)
   }
 
   private enum RenewOutcome {
     case success(ClaudeOAuthCredentials)
     case authRejected      // 4xx：refreshToken 已作废，链死
-    case networkFailure    // 超时/断网/5xx：与凭据无关，稍后重试即可
+    case requestFailure(Int) // 超时/断网/5xx：与凭据无关，稍后重试即可
+    case rateLimited
+    case deferred
   }
-
-  private func renewAccessToken(refreshToken: String) -> ClaudeOAuthCredentials? {
-    if case .success(let credentials) = renewAccessTokenDetailed(refreshToken: refreshToken) {
-      return credentials
-    }
-    return nil
-  }
-
-  // 续期节流：续期失败后至少隔 5 分钟再试。
-  // 没有这道闸，一旦 token 过期而续期又失败，每轮刷新都会打一次
-  // token 接口，很快就会被 429 限流，然后陷入"越失败越请求"的循环。
-  private static let renewThrottle = ClaudeRenewThrottle(interval: 300)
-
-  private static func renewAllowed() -> Bool { renewThrottle.allowed() }
-
-  private static func noteRenewResult(success: Bool) { renewThrottle.note(success: success) }
 
   private func renewAccessTokenDetailed(refreshToken: String) -> RenewOutcome {
-    guard Self.renewAllowed() else { return .networkFailure }
-    guard let url = URL(string: "https://console.anthropic.com/v1/oauth/token") else { return .networkFailure }
+    guard renewThrottle.allowed(token: refreshToken) else { return .deferred }
+    guard let url = URL(string: "https://platform.claude.com/v1/oauth/token") else { return .requestFailure(0) }
     var request = URLRequest(url: url)
     request.httpMethod = "POST"
     request.timeoutInterval = 12
@@ -700,31 +736,16 @@ final class ClaudeOAuthUsageSource: @unchecked Sendable {
       "refresh_token": refreshToken,
       "client_id": "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
     ]
-    guard let body = try? JSONSerialization.data(withJSONObject: payload) else { return .networkFailure }
+    guard let body = try? JSONSerialization.data(withJSONObject: payload) else { return .requestFailure(0) }
     request.httpBody = body
 
-    let semaphore = DispatchSemaphore(value: 0)
-    let box = ClaudeFetchBox()
-    let statusBox = ClaudeStatusBox()
-    URLSession.shared.dataTask(with: request) { data, response, _ in
-      defer { semaphore.signal() }
-      if let httpResponse = response as? HTTPURLResponse {
-        statusBox.set(httpResponse.statusCode)
-      }
-      guard let httpResponse = response as? HTTPURLResponse,
-            (200..<300).contains(httpResponse.statusCode),
-            let data,
-            let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-      else { return }
-      box.set(object)
-    }.resume()
-    _ = semaphore.wait(timeout: .now() + 12)
+    let response = perform(request)
 
-    if let object = box.value,
+    if (200..<300).contains(response.status), let object = response.object,
        let accessToken = object["access_token"] as? String,
        !accessToken.isEmpty {
       let expiresIn = (object["expires_in"] as? Double) ?? 3600
-      Self.noteRenewResult(success: true)
+      renewThrottle.note(success: true)
       return .success(ClaudeOAuthCredentials(
         accessToken: accessToken,
         refreshToken: (object["refresh_token"] as? String) ?? refreshToken,
@@ -734,13 +755,30 @@ final class ClaudeOAuthUsageSource: @unchecked Sendable {
     // 凭据被拒（链死）只有 400/401/403 三种；
     // 429 是限流、408 是超时，都属于"稍后再试"，绝不能当成链死——
     // 误判会让 App 放弃续期并退回不存在的明文文件，Claude 侧就此卡在过期值上。
-    let code = statusBox.value
-    Self.noteRenewResult(success: false)
+    let code = response.status
+    renewThrottle.note(success: false)
     switch code {
+    case 429:
+      return .rateLimited
     case 400, 401, 403:
       return .authRejected
     default:
-      return .networkFailure
+      return .requestFailure(code)
+    }
+  }
+
+  static func requestFailureReason(statusCode: Int) -> String {
+    switch statusCode {
+    case 429:
+      return "Claude 接口限流（429），正在退避等待后自动重试".coreL10n
+    case 401, 403:
+      return "Claude 授权被拒绝：请运行 claude auth login，码表会自动同步".coreL10n
+    case 500...599:
+      return "Claude 服务暂时异常，稍后自动重试".coreL10n
+    case 0:
+      return "网络暂时不可用，稍后自动重试".coreL10n
+    default:
+      return "Claude 额度请求失败（HTTP \(statusCode)）"
     }
   }
 
@@ -761,7 +799,7 @@ final class ClaudeOAuthUsageSource: @unchecked Sendable {
     let expiresAt = (oauth["expiresAt"] as? Double).flatMap {
       $0 > 0 ? Date(timeIntervalSince1970: $0 / 1000) : nil
     }
-    guard accessToken != nil || refreshToken != nil else { return nil }
+    guard !(accessToken ?? "").isEmpty || !(refreshToken ?? "").isEmpty else { return nil }
     return ClaudeOAuthCredentials(
       accessToken: accessToken,
       refreshToken: refreshToken,
@@ -770,33 +808,17 @@ final class ClaudeOAuthUsageSource: @unchecked Sendable {
   }
 }
 
-private final class ClaudeStatusBox: @unchecked Sendable {
-  private let lock = NSLock()
-  private var storage = 0
-  var value: Int {
-    lock.lock(); defer { lock.unlock() }
-    return storage
-  }
-  func set(_ value: Int) {
-    lock.lock(); storage = value; lock.unlock()
-  }
+private struct ClaudeHTTPResult {
+  var status: Int
+  var object: [String: Any]? = nil
+  var retryAfter: String? = nil
 }
 
-private final class ClaudeFetchBox: @unchecked Sendable {
+private final class ClaudeHTTPBox: @unchecked Sendable {
   private let lock = NSLock()
-  private var storage: [String: Any]?
-
-  var value: [String: Any]? {
-    lock.lock()
-    defer { lock.unlock() }
-    return storage
-  }
-
-  func set(_ value: [String: Any]) {
-    lock.lock()
-    storage = value
-    lock.unlock()
-  }
+  private var storage = ClaudeHTTPResult(status: 0)
+  var value: ClaudeHTTPResult { lock.lock(); defer { lock.unlock() }; return storage }
+  func set(_ value: ClaudeHTTPResult) { lock.lock(); storage = value; lock.unlock() }
 }
 
 extension ISO8601DateFormatter {
@@ -835,14 +857,14 @@ private func claudeAsciiContains<S: Sequence>(_ haystack: S, _ needle: [UInt8]) 
 
 /// 续期节流器：失败后指数退避，避免把自己打进（或长期困在）限流。
 /// 间隔序列 5→10→20→40→60 分钟封顶；一次成功即复位。
-/// 固定间隔不够用：Anthropic 的限流是按出口 IP 计的，
-/// 每 5 分钟一次的持续叩门会让限流窗口迟迟不退。
+/// 新凭据不继承旧凭据的续期失败记录；网络限流另按 Retry-After 处理。
 private final class ClaudeRenewThrottle: @unchecked Sendable {
   private let lock = NSLock()
   private let base: TimeInterval
   private let cap: TimeInterval
   private var lastFailureAt: Date?
   private var consecutiveFailures = 0
+  private var token: String?
 
   init(interval: TimeInterval, cap: TimeInterval = 3600) {
     self.base = interval
@@ -855,8 +877,13 @@ private final class ClaudeRenewThrottle: @unchecked Sendable {
     return min(base * factor, cap)
   }
 
-  func allowed() -> Bool {
+  func allowed(token: String) -> Bool {
     lock.lock(); defer { lock.unlock() }
+    if self.token != token {
+      self.token = token
+      consecutiveFailures = 0
+      lastFailureAt = nil
+    }
     guard let last = lastFailureAt else { return true }
     return Date().timeIntervalSince(last) >= currentDelay
   }
