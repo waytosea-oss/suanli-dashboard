@@ -353,6 +353,69 @@ struct ClaudeOAuthRecoveryTests {
     #expect(state.requests.count == 2)
   }
 
+  @Test func dedicatedServiceMatchesClaudeCodeConfigurationHash() {
+    let home = URL(fileURLWithPath: "/tmp/suanli-test-auth")
+    #expect(ClaudeKeychainReader.dedicatedService(configHome: home) == "Claude Code-credentials-8ec774c7")
+    #expect(ClaudeKeychainReader.dedicatedService(configHome: home) != ClaudeKeychainReader.service)
+  }
+
+  @Test func renewalUsesOfficialScopeAndTimeout() throws {
+    let (home, cache, state, session) = try fixture()
+    defer { try? FileManager.default.removeItem(at: home); session.invalidateAndCancel() }
+    ClaudeMockProtocol.handler = { request in
+      state.requests.append(request)
+      if request.url?.path == "/v1/oauth/token" {
+        #expect(request.timeoutInterval == 30)
+        // URLProtocol exposes a body stream on some Foundation versions.
+        let stream = request.httpBodyStream
+        stream?.open()
+        defer { stream?.close() }
+        var bytes = request.httpBody ?? Data()
+        if bytes.isEmpty, let stream {
+          var buffer = [UInt8](repeating: 0, count: 2048)
+          while stream.hasBytesAvailable {
+            let n = stream.read(&buffer, maxLength: buffer.count)
+            if n <= 0 { break }
+            bytes.append(contentsOf: buffer.prefix(n))
+          }
+        }
+        let payload = (try? JSONSerialization.jsonObject(with: bytes)) as? [String: Any]
+        #expect((payload?["scope"] as? String)?.contains("user:profile") == true)
+        #expect(payload?["grant_type"] as? String == "refresh_token")
+        return (200, [:], ["access_token": "rotated", "refresh_token": "rotated-refresh", "expires_in": 3600])
+      }
+      return (200, [:], Self.usage)
+    }
+    let reader = ClaudeOAuthUsageSource(claudeHome: home, fileManager: .default, cacheURL: cache,
+                                       session: session, keychainRead: { nil })
+    #expect(!reader.freshRateLimitEvents(now: Date()).isEmpty)
+  }
+
+  @Test func nonGrant400IsNotMisreportedAsRevokedLogin() throws {
+    let (home, cache, _, session) = try fixture()
+    defer { try? FileManager.default.removeItem(at: home); session.invalidateAndCancel() }
+    ClaudeMockProtocol.handler = { _ in (400, [:], ["error": "invalid_request"]) }
+    let reader = ClaudeOAuthUsageSource(claudeHome: home, fileManager: .default, cacheURL: cache,
+                                       session: session, keychainRead: { nil })
+    #expect(reader.freshRateLimitEvents(now: Date()).isEmpty)
+    #expect(ClaudeOAuthUsageSource.lastFailureReason?.contains("400") == true)
+    let metadata = try String(contentsOf: cache.appendingPathExtension("last-error"), encoding: .utf8)
+    #expect(!metadata.contains("refresh-old"))
+    #expect(!metadata.contains("accessToken"))
+  }
+
+  @Test func invalidGrantIsReportedAndRecordedWithoutSecrets() throws {
+    let (home, cache, _, session) = try fixture()
+    defer { try? FileManager.default.removeItem(at: home); session.invalidateAndCancel() }
+    ClaudeMockProtocol.handler = { _ in (400, [:], ["error": "invalid_grant"]) }
+    let reader = ClaudeOAuthUsageSource(claudeHome: home, fileManager: .default, cacheURL: cache,
+                                       session: session, keychainRead: { nil })
+    #expect(reader.freshRateLimitEvents(now: Date()).isEmpty)
+    #expect(ClaudeOAuthUsageSource.lastFailureReason?.contains("claude auth login") == true)
+    let metadata = try JSONSerialization.jsonObject(with: Data(contentsOf: cache.appendingPathExtension("last-error"))) as! [String: Any]
+    #expect(metadata["invalidGrant"] as? Bool == true)
+  }
+
 }
 
 private final class ClaudeMockProtocol: URLProtocol, @unchecked Sendable {

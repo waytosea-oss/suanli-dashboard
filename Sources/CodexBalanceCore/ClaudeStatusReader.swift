@@ -372,16 +372,24 @@ final class ClaudeOAuthUsageSource: @unchecked Sendable {
   private let cacheURL: URL
   private let keychainRead: () -> Data?
   private let renewThrottle = ClaudeRenewThrottle(interval: 300)
+  private let loginCommand: String
 
   init(claudeHome: URL, fileManager: FileManager,
        cacheURL: URL? = nil, session: URLSession = .shared,
-       keychainRead: @escaping () -> Data? = ClaudeKeychainReader.read) {
-    self.claudeHome = claudeHome
+       keychainRead: (() -> Data?)? = nil) {
+    let support = fileManager.homeDirectoryForCurrentUser
+      .appendingPathComponent("Library/Application Support/CodexBalanceDashboard")
+    let dedicatedHome = support.appendingPathComponent("claude-auth")
+    let dedicated = cacheURL == nil && fileManager.fileExists(atPath: dedicatedHome.appendingPathComponent(".dashboard-auth").path)
+    let service = dedicated ? ClaudeKeychainReader.dedicatedService(configHome: dedicatedHome) : ClaudeKeychainReader.service
+    self.claudeHome = dedicated ? dedicatedHome : claudeHome
     self.fileManager = fileManager
     self.session = session
-    self.keychainRead = keychainRead
-    self.cacheURL = cacheURL ?? fileManager.homeDirectoryForCurrentUser
-      .appendingPathComponent("Library/Application Support/CodexBalanceDashboard/claude-oauth-cache.json")
+    self.keychainRead = keychainRead ?? { ClaudeKeychainReader.read(service: service) }
+    self.cacheURL = cacheURL ?? (dedicated
+      ? dedicatedHome.appendingPathComponent("usage-oauth-cache.json")
+      : support.appendingPathComponent("claude-oauth-cache.json"))
+    self.loginCommand = dedicated ? "桌面的「修复Claude连接.command」" : "claude auth login"
     if let data = try? Data(contentsOf: self.cacheURL.appendingPathExtension("retry")),
        let state = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
        let until = state["until"] as? Double, until > Date().timeIntervalSince1970 {
@@ -493,7 +501,7 @@ final class ClaudeOAuthUsageSource: @unchecked Sendable {
           }
         }
       }
-      Self.noteFailure(Self.requestFailureReason(statusCode: response.status))
+      Self.noteFailure(Self.requestFailureReason(statusCode: response.status).replacingOccurrences(of: "claude auth login", with: loginCommand))
       return []
     }
     let result = events(from: object, now: now)
@@ -512,11 +520,22 @@ final class ClaudeOAuthUsageSource: @unchecked Sendable {
       semaphore.signal()
     }
     task.resume()
-    guard semaphore.wait(timeout: .now() + 13) == .success else {
+    guard semaphore.wait(timeout: .now() + request.timeoutInterval + 1) == .success else {
       task.cancel()
       return ClaudeHTTPResult(status: 0)
     }
     let response = box.value
+    if !(200..<300).contains(response.status) {
+      let metadata: [String: Any] = [
+        "timestamp": Date().timeIntervalSince1970,
+        "endpoint": request.url?.path ?? "",
+        "httpStatus": response.status,
+        "invalidGrant": response.object?["error"] as? String == "invalid_grant"
+      ]
+      if let data = try? JSONSerialization.data(withJSONObject: metadata) {
+        try? data.write(to: cacheURL.appendingPathExtension("last-error"), options: .atomic)
+      }
+    }
     if response.status == 429 {
       let now = Date()
       let formatter = DateFormatter()
@@ -669,7 +688,7 @@ final class ClaudeOAuthUsageSource: @unchecked Sendable {
       return credentials.accessToken
     }
     guard let refreshToken = credentials?.refreshToken, !refreshToken.isEmpty else {
-      Self.noteFailure("未找到有效 Claude 登录：请运行 claude auth login，码表会自动同步".coreL10n)
+      Self.noteFailure("未找到有效 Claude 登录：请运行 \(loginCommand)，码表会自动同步")
       return nil
     }
     switch renewAccessTokenDetailed(refreshToken: refreshToken) {
@@ -682,9 +701,9 @@ final class ClaudeOAuthUsageSource: @unchecked Sendable {
     case .deferred:
       break // Preserve the actual failure instead of relabeling backoff as a network error.
     case .requestFailure(let status):
-      Self.noteFailure(Self.requestFailureReason(statusCode: status))
+      Self.noteFailure(Self.requestFailureReason(statusCode: status).replacingOccurrences(of: "claude auth login", with: loginCommand))
     case .authRejected:
-      Self.noteFailure("Claude 授权已失效：请运行 claude auth login，码表会自动同步".coreL10n)
+      Self.noteFailure("Claude 授权已失效：请运行 \(loginCommand)，码表会自动同步")
     }
     return nil
   }
@@ -729,12 +748,13 @@ final class ClaudeOAuthUsageSource: @unchecked Sendable {
     guard let url = URL(string: "https://platform.claude.com/v1/oauth/token") else { return .requestFailure(0) }
     var request = URLRequest(url: url)
     request.httpMethod = "POST"
-    request.timeoutInterval = 12
+    request.timeoutInterval = 30
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
     let payload: [String: Any] = [
       "grant_type": "refresh_token",
       "refresh_token": refreshToken,
-      "client_id": "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
+      "client_id": "9d1c250a-e61b-44d9-88ed-5944d1962f5e",
+      "scope": "user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload"
     ]
     guard let body = try? JSONSerialization.data(withJSONObject: payload) else { return .requestFailure(0) }
     request.httpBody = body
@@ -760,7 +780,9 @@ final class ClaudeOAuthUsageSource: @unchecked Sendable {
     switch code {
     case 429:
       return .rateLimited
-    case 400, 401, 403:
+    case 400 where response.object?["error"] as? String == "invalid_grant":
+      return .authRejected
+    case 401:
       return .authRejected
     default:
       return .requestFailure(code)

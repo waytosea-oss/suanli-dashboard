@@ -1,13 +1,19 @@
 import Foundation
 import Security
+import CryptoKit
 
 /// Read only the current user's Claude entry through the already-trusted Apple tool.
 /// Inspect metadata first; never ask the user to unlock a keychain or change its ACL.
 enum ClaudeKeychainReader {
   static let service = "Claude Code-credentials"
 
-  static func read() -> Data? {
-    guard securityToolIsTrusted() else { return nil }
+  static func dedicatedService(configHome: URL) -> String {
+    let digest = SHA256.hash(data: Data(configHome.path.precomposedStringWithCanonicalMapping.utf8))
+    return service + "-" + digest.map { String(format: "%02x", $0) }.joined().prefix(8)
+  }
+
+  static func read(service: String = service) -> Data? {
+    guard securityToolIsTrusted(service: service) else { return nil }
     let process = Process()
     process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
     process.arguments = ["find-generic-password", "-s", service, "-a", NSUserName(), "-w"]
@@ -32,7 +38,7 @@ enum ClaudeKeychainReader {
     return bytes.data
   }
 
-  static func securityToolIsTrusted() -> Bool {
+  static func securityToolIsTrusted(service: String = service) -> Bool {
     // This legacy-keychain switch applies only to our process, including the metadata APIs below.
     SecKeychainSetUserInteractionAllowed(false)
     let query: [String: Any] = [
